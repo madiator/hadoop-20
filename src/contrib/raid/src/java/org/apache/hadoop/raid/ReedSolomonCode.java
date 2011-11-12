@@ -23,7 +23,7 @@ import java.util.Set;
 public class ReedSolomonCode implements ErasureCode {
 
   private final int stripeSize;
-  private final int paritySize;
+  private final int paritySize; 
   private final int[] generatingPolynomial;
   private final int PRIMITIVE_ROOT = 2;
   private final int[] primitivePower;
