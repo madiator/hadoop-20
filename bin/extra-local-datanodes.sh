@@ -15,7 +15,7 @@ fi
 
 run_datanode () {
   DN=$2
-  export HADOOP_IDENT_STRING="$USER"
+  export HADOOP_IDENT_STRING="$USER-$DN"
   HADOOP_DATANODE_ARGS="\
     -D dfs.datanode.address=0.0.0.0:`expr 50010 + $DN` \
     -D dfs.datanode.http.address=0.0.0.0:`expr 50075 + $DN` \
