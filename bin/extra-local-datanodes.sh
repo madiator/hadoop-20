@@ -15,12 +15,12 @@ fi
 
 run_datanode () {
   DN=$2
-  export HADOOP_IDENT_STRING="$USER-$DN"
+  export HADOOP_IDENT_STRING="$USER"
   HADOOP_DATANODE_ARGS="\
     -D dfs.datanode.address=0.0.0.0:`expr 50010 + $DN` \
     -D dfs.datanode.http.address=0.0.0.0:`expr 50075 + $DN` \
     -D dfs.datanode.ipc.address=0.0.0.0:`expr 50020 + $DN` \
-    -D dfs.data.dir=/tmp/hadoop-$USER/dfs/data$DN"
+    -D dfs.data.dir=/app/hadoop/tmp-$USER/dfs/data$DN"
   "$bin"/hadoop-daemon.sh $1 datanode $HADOOP_DATANODE_ARGS
 }
 

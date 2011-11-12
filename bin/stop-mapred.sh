@@ -25,6 +25,7 @@ bin=`cd "$bin"; pwd`
 
 "$bin"/hadoop-daemon.sh --config $HADOOP_CONF_DIR stop jobtracker
 "$bin"/hadoop-daemons.sh --config $HADOOP_CONF_DIR stop tasktracker
-"$bin"/stop-raidnode-remote.sh --config $HADOOP_CONF_DIR
-"$bin"/stop-hmon-remote.sh --config $HADOOP_CONF_DIR
+"$bin"/stop-raidnode.sh --config $HADOOP_CONF_DIR
+#"$bin"/stop-raidnode-remote.sh --config $HADOOP_CONF_DIR
+#"$bin"/stop-hmon-remote.sh --config $HADOOP_CONF_DIR
 
