@@ -49,13 +49,15 @@ public class ReedSolomonDecoder extends Decoder {
   Semaphore decodeOps;
 
   public ReedSolomonDecoder(
-    Configuration conf, int stripeSize, int paritySize) {
-    super(conf, stripeSize, paritySize);
+    Configuration conf, int stripeSize, int paritySize) {	
+    super(conf, stripeSize, paritySize,3);
+    int simpleParityDegree = 3;
     this.reedSolomonCode = new ReedSolomonCode[parallelism];
     for (int i = 0; i < parallelism; i++) {
-      reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, 3);
+      reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
     }
     decodeOps = new Semaphore(parallelism);
+    LOG.info("MAHESH initialized ReedSolomonDecoder");
   }
 
   @Override

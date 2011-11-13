@@ -51,6 +51,7 @@ public abstract class Encoder {
   protected int parallelism;
   protected int stripeSize;
   protected int paritySize;
+  protected int simpleParityDegree;
   protected Random rand;
   protected int bufSize;
   protected byte[][] readBufs;
@@ -65,7 +66,7 @@ public abstract class Encoder {
     public void write(byte[] b, int off, int len) throws IOException {}
   }
 
-  Encoder(
+  private void EncoderCommon(
     Configuration conf, int stripeSize, int paritySize) {
     this.conf = conf;
     this.parallelism = conf.getInt("raid.encoder.parallelism",
@@ -77,6 +78,17 @@ public abstract class Encoder {
     this.writeBufs = new byte[paritySize][];
     allocateBuffers();
   }
+  
+  Encoder(Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
+	  this.simpleParityDegree = 3;
+	  EncoderCommon(conf, stripeSize, paritySize);
+  }
+  
+  Encoder(Configuration conf, int stripeSize, int paritySize) {
+	  this.simpleParityDegree = 0;
+	  EncoderCommon(conf, stripeSize, paritySize);
+  }
+  
 
   private void allocateBuffers() {
     for (int i = 0; i < paritySize; i++) {

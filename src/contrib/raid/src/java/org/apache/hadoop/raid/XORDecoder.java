@@ -38,6 +38,7 @@ public class XORDecoder extends Decoder {
   public XORDecoder(
     Configuration conf, int stripeSize) {
     super(conf, stripeSize, 1);
+    LOG.info("MAHESH initialized XORDecoder");
   }
 
   @Override

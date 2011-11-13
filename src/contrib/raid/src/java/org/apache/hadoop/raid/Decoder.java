@@ -50,12 +50,13 @@ public abstract class Decoder {
   protected int parallelism;
   protected int stripeSize;
   protected int paritySize;
+  protected int simpleParityDegree;
   protected Random rand;
   protected int bufSize;
   protected byte[][] readBufs;
-  protected byte[][] writeBufs;
+  protected byte[][] writeBufs;  
 
-  Decoder(Configuration conf, int stripeSize, int paritySize) {
+  private void DecoderCommon(Configuration conf, int stripeSize, int paritySize) {
     this.conf = conf;
     this.parallelism = conf.getInt("raid.encoder.parallelism",
                                    DEFAULT_PARALLELISM);
@@ -65,6 +66,16 @@ public abstract class Decoder {
     this.bufSize = conf.getInt("raid.decoder.bufsize", 1024 * 1024);
     this.writeBufs = new byte[paritySize][];
     allocateBuffers();
+  }
+  
+  Decoder(Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
+	  this.simpleParityDegree = simpleParityDegree;
+	  DecoderCommon(conf, stripeSize, paritySize);
+  }
+  
+  Decoder(Configuration conf, int stripeSize, int paritySize) {	  
+	  this.simpleParityDegree = 0;
+	  DecoderCommon(conf, stripeSize, paritySize);
   }
 
   private void allocateBuffers() {
