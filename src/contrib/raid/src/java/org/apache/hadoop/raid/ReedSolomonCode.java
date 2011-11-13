@@ -22,76 +22,134 @@ import java.util.Set;
 
 public class ReedSolomonCode implements ErasureCode {
 
-  private final int stripeSize;
-  private final int paritySize;
-  private final int simpleParityDegree;
-  private final int[] generatingPolynomial;
-  private final int PRIMITIVE_ROOT = 2;
-  private final int[] primitivePower;
-  private final GaloisField GF = GaloisField.getInstance();
-  private int[] errSignature;
-  private final int[] paritySymbolLocations;
-  private final int[] dataBuff;
+	private final int 	stripeSize;
+	private final int 	paritySize;
+	private final int 	paritySizeRS;
+	private final int 	paritySizeSRC;
+	private final int 	simpleParityDegree;
+	private final int[] generatingPolynomial;
+	private final int 	PRIMITIVE_ROOT = 2;
+	private final int[] primitivePower;
+	private final GaloisField GF = GaloisField.getInstance(256, 285);
+	private int[]		errSignature; 
+	private final int[] paritySymbolLocations;
+	private final int[] dataBuff;
 
   public ReedSolomonCode(int stripeSize, int paritySize, int simpleParityDegree) {
-    assert(stripeSize + paritySize < GF.getFieldSize());
-    this.stripeSize = stripeSize;
-    this.paritySize = paritySize;
-    this.simpleParityDegree = simpleParityDegree;
-    this.errSignature = new int[paritySize];
-    this.paritySymbolLocations = new int[paritySize];
-    this.dataBuff = new int[paritySize + stripeSize];
-    for (int i = 0; i < paritySize; i++) {
-      paritySymbolLocations[i] = i;
-    }
+	  	assert(stripeSize + paritySize < GF.getFieldSize());
+		this.stripeSize 			= stripeSize;//k
+		this.paritySize 			= paritySize;//n-k = n'/f+n'-k
+		this.simpleParityDegree		= simpleParityDegree;
+		this.paritySizeRS 			= ((simpleParityDegree)*(paritySize+stripeSize))/(simpleParityDegree+1) - stripeSize ; // n' = (f+1)/f*n-k
+		this.paritySizeSRC 			= paritySize-paritySizeRS;//n'/f;
+		this.errSignature 			= new int[paritySizeRS];
+		this.paritySymbolLocations 	= new int[paritySizeRS+paritySizeSRC];
+		this.dataBuff 				= new int[paritySizeRS + stripeSize];
+		
+		for (int i = 0; i < paritySizeRS+paritySizeSRC; i++) {
+			paritySymbolLocations[i] = i;
+		}
 
-    this.primitivePower = new int[stripeSize + paritySize];
-    // compute powers of the primitive root
-    for (int i = 0; i < stripeSize + paritySize; i++) {
-      primitivePower[i] = GF.power(PRIMITIVE_ROOT, i);
-    }
-    // compute generating polynomial
-    int[] gen = {1};
-    int[] poly = new int[2];
-    for (int i = 0; i < paritySize; i++) {
-      poly[0] = primitivePower[i];
-      poly[1] = 1;
-      gen = GF.multiply(gen, poly);
-    }
-    // generating polynomial has all generating roots
-    generatingPolynomial = gen;
+		this.primitivePower = new int[stripeSize + paritySizeRS];
+		// compute powers of the primitive root
+		for (int i = 0; i < stripeSize + paritySizeRS; i++) {
+			primitivePower[i] = GF.power(PRIMITIVE_ROOT, i);
+		}
+		// compute generating polynomial
+		int[] gen  = {1};
+		int[] poly = new int[2];
+		for (int i = 0; i < paritySizeRS; i++) {
+			poly[0] = primitivePower[i];
+			poly[1] = 1;
+			gen 	= GF.multiply(gen, poly);
+		}
+		// generating polynomial has all generating roots
+		generatingPolynomial = gen;
   }
 
   @Override
-  public void encode(int[] message, int[] parity) {
-    assert(message.length == stripeSize && parity.length == paritySize);
-    for (int i = 0; i < paritySize; i++) {
-      dataBuff[i] = 0;
-    }
-    for (int i = 0; i < stripeSize; i++) {
-      dataBuff[i + paritySize] = message[i];
-    }
-    GF.remainder(dataBuff, generatingPolynomial);
-    for (int i = 0; i < paritySize; i++) {
-      parity[i] = dataBuff[i];
-    }
-  }
+	public void encode(int[] message, int[] parity) {
+		assert(message.length == stripeSize && parity.length == paritySizeRS+paritySizeSRC);
+
+		for (int i = 0; i < paritySizeRS; i++) {
+			dataBuff[i] = 0;
+		}
+		for (int i = 0; i < stripeSize; i++) {
+			dataBuff[i + paritySizeRS] = message[i];
+		}
+		GF.remainder(dataBuff, generatingPolynomial);
+		for (int i = 0; i < paritySizeRS; i++) {
+			parity[paritySizeSRC+i] = dataBuff[i];
+		}
+		for (int i = 0; i < stripeSize; i++) {
+			dataBuff[i + paritySizeRS] = message[i];
+		}
+		for (int i = 0; i < paritySizeSRC; i++) {
+			for (int f = 0; f < simpleParityDegree; f++) {				
+				parity[i] = GF.add(dataBuff[i*simpleParityDegree+f], parity[i]);
+			}
+		}
+	}
 
   @Override
-  public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
-    if (erasedLocation.length == 0) {
-      return;
-    }
-    assert(erasedLocation.length == erasedValue.length);
-    for (int i = 0; i < erasedLocation.length; i++) {
-      data[erasedLocation[i]] = 0;
-    }
-    for (int i = 0; i < erasedLocation.length; i++) {
-      errSignature[i] = primitivePower[erasedLocation[i]];
-      erasedValue[i] = GF.substitute(data, primitivePower[i]);
-    }
-    GF.solveVandermondeSystem(errSignature, erasedValue, erasedLocation.length);
-  }
+	public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
+
+		int[] dataRS = new int[paritySizeRS+stripeSize];
+		int erasedLocationLengthRS = 0;		
+		double singleErasureGroup = 0;
+
+		if (erasedLocation.length == 0) {
+			return;
+		}
+		assert(erasedLocation.length == erasedValue.length);
+
+		// create a copy of the RS data
+		for (int i = paritySizeSRC; i < stripeSize+paritySizeRS+paritySizeSRC; i++) {
+			dataRS[i-paritySizeSRC] = data[i];
+		}
+		if (erasedLocation.length > 1) {
+			// first check for any RS lost elements and repair them
+			for (int i = 0; i < erasedLocation.length; i++) {
+
+				if (erasedLocation[i]>=paritySizeSRC){// if it is an RS block erasure
+					errSignature[i] = primitivePower[erasedLocation[i]-paritySizeSRC];
+					erasedValue[i] = GF.substitute(dataRS, primitivePower[erasedLocationLengthRS]);
+					erasedLocationLengthRS++;
+				}
+			}
+			GF.solveVandermondeSystem(errSignature, erasedValue, erasedLocationLengthRS);
+			for (int i = 0; i < erasedLocationLengthRS; i++) {
+				dataRS[erasedLocation[i]-paritySizeSRC] = erasedValue[i];
+			}
+			// then check if there are any simple XORs erased
+			for (int i = 0; i < erasedLocation.length; i++) {
+				if (erasedLocation[i]<paritySizeSRC){
+					for (int f = 0; f < simpleParityDegree; f++) {
+						erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
+					}
+				}
+
+			}
+		}
+		// if there is only a single lost node
+		else if (erasedLocation.length == 1){
+			// find its XOR group 
+			if (erasedLocation[0]>=paritySizeSRC){
+				singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
+			}
+			else{
+				singleErasureGroup = erasedLocation[0]+1;
+			}
+			//System.out.println(Arrays.toString(dataRS));
+			//and repair it
+			for (int f = 0; f < simpleParityDegree; f++) {
+				erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
+				//System.out.println("The erased value at iteration f = " + f + " is equal to " +erasedValue[0]);
+			}
+			erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
+			//System.out.println("The erased value  is equal to " +erasedValue[0]);
+		}
+	}
 
   @Override
   public int stripeSize() {
