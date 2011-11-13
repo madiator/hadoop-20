@@ -56,7 +56,8 @@ public class ReedSolomonDecoder extends Decoder {
       reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
     }
     decodeOps = new Semaphore(parallelism);
-    LOG.info("MAHESH initialized ReedSolomonDecoder");
+    LOG.info("MAHESH initialized ReedSolomonDecoder" +
+    		" with simpleParityDegree = "+simpleParityDegree);
   }
 
   @Override

@@ -40,7 +40,8 @@ public class ReedSolomonEncoder extends Encoder {
     Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
     super(conf, stripeSize, paritySize, simpleParityDegree);    
     this.reedSolomonCode = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
-    LOG.info("MAHESH initialized ReedSolomonEncoder");   
+    LOG.info("MAHESH initialized ReedSolomonEncoder" +
+    		" with simpleParityDegree = "+simpleParityDegree);   
   }
 
   protected void encodeStripeImpl(

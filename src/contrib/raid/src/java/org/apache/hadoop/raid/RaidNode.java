@@ -76,10 +76,12 @@ public abstract class RaidNode implements RaidProtocol {
   // Default stripe length = 5, parity length for RS code = 3
   public static final int DEFAULT_STRIPE_LENGTH = 5;
   public static final int RS_PARITY_LENGTH_DEFAULT = 3;
-
+  public static final int RS_SIMPLEPARITY_DEGREE_DEFAULT = 3;
+    
   public static final String RS_PARITY_LENGTH_KEY = "hdfs.raidrs.paritylength";
   public static final String STRIPE_LENGTH_KEY = "hdfs.raid.stripeLength";
-
+  public static final String RS_SIMPLEPARITY_DEGREE_KEY = "hdfs.raidrs.simpleparitydegree";
+  
   public static final String DEFAULT_RAID_LOCATION = "/raid";
   public static final String RAID_LOCATION_KEY = "hdfs.raid.locations";
   public static final String DEFAULT_RAID_TMP_LOCATION = "/tmp/raid";
@@ -1158,7 +1160,8 @@ public abstract class RaidNode implements RaidProtocol {
       case XOR:
         return new XOREncoder(conf, stripeLength);
       case RS:
-        return new ReedSolomonEncoder(conf, stripeLength, rsParityLength(conf), 3);
+        return new ReedSolomonEncoder(conf, stripeLength, 
+        		rsParityLength(conf), rsSimpleParityDegree(conf));
       default:
         return null;
     }
@@ -1187,6 +1190,13 @@ public abstract class RaidNode implements RaidProtocol {
    */
   public static int rsParityLength(Configuration conf) {
     return conf.getInt(RS_PARITY_LENGTH_KEY, RS_PARITY_LENGTH_DEFAULT);
+  }
+  
+  /**
+   * Obtain simpleParityDegree from configuration
+   */
+  public static int rsSimpleParityDegree(Configuration conf) {
+    return conf.getInt(RS_SIMPLEPARITY_DEGREE_KEY, RS_SIMPLEPARITY_DEGREE_DEFAULT);
   }
 
   static boolean isParityHarPartFile(Path p) {

@@ -75,8 +75,11 @@ abstract class BlockReconstructor extends Configured {
     xorEncoder = new XOREncoder(getConf(), stripeLength);
     xorDecoder = new XORDecoder(getConf(), stripeLength);
     int parityLength = RaidNode.rsParityLength(getConf());
-    rsEncoder = new ReedSolomonEncoder(getConf(), stripeLength, parityLength, 3);
-    rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength, parityLength, 3);
+    int simpleParityDegree = RaidNode.rsSimpleParityDegree(getConf());
+    rsEncoder = new ReedSolomonEncoder(getConf(), stripeLength, 
+    		parityLength, simpleParityDegree);
+    rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength, 
+    		parityLength, simpleParityDegree);
 
   }
   
