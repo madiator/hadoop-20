@@ -96,7 +96,7 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
         return new XORDecoder(conf, stripeLength);
       } else if (this.type == ErasureCodeType.RS) {
         return new ReedSolomonDecoder(conf, stripeLength,
-                              RaidNode.rsParityLength(conf));
+                              RaidNode.rsParityLength(conf), 3);
       }
       return null;
     }

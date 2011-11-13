@@ -49,9 +49,8 @@ public class ReedSolomonDecoder extends Decoder {
   Semaphore decodeOps;
 
   public ReedSolomonDecoder(
-    Configuration conf, int stripeSize, int paritySize) {	
-    super(conf, stripeSize, paritySize,3);
-    int simpleParityDegree = 3;
+    Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {	
+    super(conf, stripeSize, paritySize,simpleParityDegree);    
     this.reedSolomonCode = new ReedSolomonCode[parallelism];
     for (int i = 0; i < parallelism; i++) {
       reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);

@@ -1158,7 +1158,7 @@ public abstract class RaidNode implements RaidProtocol {
       case XOR:
         return new XOREncoder(conf, stripeLength);
       case RS:
-        return new ReedSolomonEncoder(conf, stripeLength, rsParityLength(conf));
+        return new ReedSolomonEncoder(conf, stripeLength, rsParityLength(conf), 3);
       default:
         return null;
     }

@@ -37,9 +37,8 @@ public class ReedSolomonEncoder extends Encoder {
   private ErasureCode reedSolomonCode;
 
   public ReedSolomonEncoder(
-    Configuration conf, int stripeSize, int paritySize) {
-    super(conf, stripeSize, paritySize, 3);
-    int simpleParityDegree = 3;
+    Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
+    super(conf, stripeSize, paritySize, simpleParityDegree);    
     this.reedSolomonCode = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
     LOG.info("MAHESH initialized ReedSolomonEncoder");   
   }
