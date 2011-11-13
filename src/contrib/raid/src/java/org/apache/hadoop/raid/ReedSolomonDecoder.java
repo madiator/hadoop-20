@@ -53,7 +53,7 @@ public class ReedSolomonDecoder extends Decoder {
     super(conf, stripeSize, paritySize);
     this.reedSolomonCode = new ReedSolomonCode[parallelism];
     for (int i = 0; i < parallelism; i++) {
-      reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize);
+      reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, 3);
     }
     decodeOps = new Semaphore(parallelism);
   }

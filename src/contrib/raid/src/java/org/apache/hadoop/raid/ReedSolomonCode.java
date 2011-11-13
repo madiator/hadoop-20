@@ -23,7 +23,8 @@ import java.util.Set;
 public class ReedSolomonCode implements ErasureCode {
 
   private final int stripeSize;
-  private final int paritySize; 
+  private final int paritySize;
+  private final int simpleParityDegree;
   private final int[] generatingPolynomial;
   private final int PRIMITIVE_ROOT = 2;
   private final int[] primitivePower;
@@ -32,10 +33,11 @@ public class ReedSolomonCode implements ErasureCode {
   private final int[] paritySymbolLocations;
   private final int[] dataBuff;
 
-  public ReedSolomonCode(int stripeSize, int paritySize) {
+  public ReedSolomonCode(int stripeSize, int paritySize, int simpleParityDegree) {
     assert(stripeSize + paritySize < GF.getFieldSize());
     this.stripeSize = stripeSize;
     this.paritySize = paritySize;
+    this.simpleParityDegree = simpleParityDegree;
     this.errSignature = new int[paritySize];
     this.paritySymbolLocations = new int[paritySize];
     this.dataBuff = new int[paritySize + stripeSize];

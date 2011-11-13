@@ -39,7 +39,7 @@ public class ReedSolomonEncoder extends Encoder {
   public ReedSolomonEncoder(
     Configuration conf, int stripeSize, int paritySize) {
     super(conf, stripeSize, paritySize);
-    this.reedSolomonCode = new ReedSolomonCode(stripeSize, paritySize);
+    this.reedSolomonCode = new ReedSolomonCode(stripeSize, paritySize, 3);
   }
 
   protected void encodeStripeImpl(
