@@ -58,6 +58,20 @@
     <description>Check for superuser privileges?</description>
   </property>
 
- 
+ 	<property>
+		<name>hdfs.raid.stripeLength</name>
+		<value>5</value>
+		<description>The stripe length for the code. stripeLength number of blocks are used for coding</description>
+	</property>
+ 	<property>
+		<name>hdfs.raidrs.paritylength</name>
+		<value>3</value>
+		<description>The number of parity blocks generated from stripeLength number of blocks</description>
+	</property>
+ 	<property>
+		<name>hdfs.raidrs.simpleparitydegree</name>
+		<value>3</value>
+		<description>The degree of the SRC</description>
+	</property>
   
 </configuration>
