@@ -118,11 +118,11 @@ public abstract class Decoder {
   public void recoverBlockToFile(
     FileSystem srcFs, Path srcPath, FileSystem parityFs, Path parityPath,
     long blockSize, long blockOffset, File localBlockFile, long limit,
-    Progressable reporter)
+    Progressable reporter, boolean lightDecoder)
       throws IOException {
     OutputStream out = new FileOutputStream(localBlockFile);
     fixErasedBlock(srcFs, srcPath, parityFs, parityPath,
-                  blockSize, blockOffset, limit, out, reporter);
+                  blockSize, blockOffset, limit, out, reporter, lightDecoder);
     out.close();
   }
 
@@ -135,10 +135,10 @@ public abstract class Decoder {
   void fixErasedBlock(
       FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
       long blockSize, long errorOffset, long limit,
-      OutputStream out, Progressable reporter) throws IOException {
+      OutputStream out, Progressable reporter, boolean lightDecoder) throws IOException {
     configureBuffers(blockSize);
     fixErasedBlockImpl(fs, srcFile, parityFs, parityFile,
-      blockSize, errorOffset, limit, out, reporter);
+      blockSize, errorOffset, limit, out, reporter, lightDecoder);
   }
 
   /**
@@ -156,9 +156,10 @@ public abstract class Decoder {
    *        This is to prevent writing beyond the end of the file.
    * @param out The output.
    * @param reporter A mechanism to report progress.
+   * @param lightDecoder A mechanism to first decode as fast as possible.
    */
   protected abstract void fixErasedBlockImpl(
       FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
       long blockSize, long errorOffset, long limit,
-      OutputStream out, Progressable reporter) throws IOException;
+      OutputStream out, Progressable reporter, boolean lightDecoder) throws IOException;
 }

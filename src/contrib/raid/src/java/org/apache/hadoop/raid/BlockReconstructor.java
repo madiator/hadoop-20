@@ -239,25 +239,39 @@ abstract class BlockReconstructor extends Configured {
       File localBlockFile =
         File.createTempFile(lostBlock.getBlockName(), ".tmp");
       localBlockFile.deleteOnExit();
-
+      boolean lightDecoder = true;
+      
+      
       try {
-        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
-            parityPair.getPath(), blockSize,
-            lostBlockOffset, localBlockFile,
-            blockContentsSize, progress);
-
-        // Now that we have recovered the file block locally, send it.
-        String datanode = chooseDatanode(lb.getLocations());
-        computeMetadataAndSendReconstructedBlock(datanode, localBlockFile,
-            lostBlock, blockContentsSize);
-        
-        numBlocksReconstructed++;
-
-      } finally {
+    	  for(int lightIterator = 0;lightIterator<2;lightIterator++) {    	  
+	    	  try {
+		        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
+		            parityPair.getPath(), blockSize,
+		            lostBlockOffset, localBlockFile,
+		            blockContentsSize, progress, lightDecoder);
+		
+		        // Now that we have recovered the file block locally, send it.
+		        String datanode = chooseDatanode(lb.getLocations());
+		        computeMetadataAndSendReconstructedBlock(datanode, localBlockFile,
+		            lostBlock, blockContentsSize);
+		        
+		        numBlocksReconstructed++;
+		        break; //if this is successful, break out of the loop
+		
+		      }catch(IOException e) {    	  
+		    	  // lightDecoder failed. 
+		    	  // So try the heavy version by setting lightDecoder parameter to false
+		    	  //if(e.getMessage().equals("LIGHTDECODERFAILED")) 
+		    	  lightDecoder = false; 
+		      }
+	      }
+      }
+      finally {
         localBlockFile.delete();
       }
       progress.progress();
     }
+    
     
     LOG.info("Reconstructed " + numBlocksReconstructed + " blocks in " + srcPath);
     return true;
