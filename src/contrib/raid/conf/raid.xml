@@ -31,25 +31,16 @@
         </property>
  	<property>
 		<name>raid.blockfix.interval</name>
-		<value>200000</value>
-		<description>interval between checks for lost files</description>
+		<value>2000</value>
+		<description>interval in milliseconds between checks for lost files. Default is 1 minute</description>
 	</property>
- 	<property>
-		<name>hdfs.raid.stripeLength</name>
-		<value>5</value>
-		<description>The stripe length for the code. stripeLength number of blocks are used for coding</description>
+	<property>
+	    <name>raid.blockfix.classname</name>
+	    <value>org.apache.hadoop.raid.LocalBlockIntegrityMonitor</value>
+	    <description>Specify the BlockIntegrityMonitor implementation to use.
+	      The default is org.apache.hadoop.raid.DistBlockIntegrityMonitor.
+	    </description>
 	</property>
- 	<property>
-		<name>hdfs.raidrs.paritylength</name>
-		<value>3</value>
-		<description>The number of parity blocks generated from stripeLength number of blocks</description>
-	</property>
- 	<property>
-		<name>hdfs.raidrs.simpleparitydegree</name>
-		<value>3</value>
-		<description>The degree of the SRC</description>
-	</property>
-
       </policy>
     </srcPath>
    </configuration>
