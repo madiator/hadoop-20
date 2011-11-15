@@ -64,7 +64,7 @@ public abstract class BlockIntegrityMonitor extends Configured {
     try {
       // default to distributed integrity monitor
       Class<?> blockFixerClass =
-        conf.getClass(BLOCKFIX_CLASSNAME, LocalBlockIntegrityMonitor.class); //MAHESH: WAS DistBlockIntegrityMonitory.class
+        conf.getClass(BLOCKFIX_CLASSNAME, DistBlockIntegrityMonitor.class); 
       if (!BlockIntegrityMonitor.class.isAssignableFrom(blockFixerClass)) {
         throw new ClassNotFoundException("not an implementation of " +
         		"blockintegritymonitor");
