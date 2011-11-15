@@ -82,7 +82,7 @@ public class ReedSolomonDecoder extends Decoder {
     waitTime = 0;
     try {
       writeFixedBlock(inputs, erasedLocations, erasedLocationToFix,
-                      limit, out, reporter, parallelReader);
+                      limit, out, reporter, parallelReader, lightDecoder);
     } finally {
       // Inputs will be closed by parallelReader.shutdown().
       parallelReader.shutdown();
@@ -128,10 +128,11 @@ public class ReedSolomonDecoder extends Decoder {
     	  for(int i = 0; i < erasedLocations.size(); i++) {
     		  erasedLocationsArray[i] = erasedLocations.get(i);
     	  }
+    	  LOG.info("LALALA:  erasedLocations = "+convertToString(erasedLocationsArray));   
     	  blocksToFetch(erasedLocationsArray,locationsToFetch);
+    	  LOG.info("LALALA:  locationsToFetch = "+convertToString(locationsToFetch));   	
     	  for(int i = 0; i < locationsToFetch.length; i++) {
-    		  FSDataInputStream in;
-    		  LOG.info(locationsToFetch[i]);   		  
+    		  FSDataInputStream in;    		    
     		 
     		  if(i<paritySize) {
     			  long offset = blockSize * (stripeIdx * paritySize + i);
@@ -145,6 +146,7 @@ public class ReedSolomonDecoder extends Decoder {
     			  else {
     				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
     			              offset + blockSize));
+    				  
     				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
     			  }
     		  }else {
@@ -159,10 +161,10 @@ public class ReedSolomonDecoder extends Decoder {
     			  else {
     				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
     			              offset + blockSize));
+    				  
     				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
     			  }
-    		  }
-    		  
+    		  }  		  
     		  
     	  }
     	  LOG.info("Light decoder finished");
@@ -170,7 +172,8 @@ public class ReedSolomonDecoder extends Decoder {
       }
       else {
     	  // Do the heavy decoding!
-	      // First open streams to the parity blocks.
+    	  LOG.info("Begin Heavy Decoder");
+	      // First open streams to the parity blocks.    	  
 	      for (int i = 0; i < paritySize; i++) {
 	        long offset = blockSize * (stripeIdx * paritySize + i);
 	        FSDataInputStream in = parityFs.open(
@@ -201,6 +204,7 @@ public class ReedSolomonDecoder extends Decoder {
 	          inputs[i] = in;
 	        }
 	      }
+	      LOG.info("Heavy Decoder finished");
       }
       if (erasedLocations.size() > paritySize) {
         String msg = "Too many erased locations: " + erasedLocations.size();
@@ -219,6 +223,13 @@ public class ReedSolomonDecoder extends Decoder {
 
   }
 
+  private String convertToString(int[] array) {
+	  String str =""+array[0];	  
+	  for(int i=1;i<array.length;i++) 
+		  str = str+", "+array[i];
+	  
+	  return str;
+  }
   /**
    * Decode the inputs provided and write to the output.
    * @param inputs array of inputs.
@@ -235,7 +246,8 @@ public class ReedSolomonDecoder extends Decoder {
           long limit,
           OutputStream out,
           Progressable reporter,
-          ParallelStreamReader parallelReader) throws IOException {
+          ParallelStreamReader parallelReader, 
+          boolean lightDecoder) throws IOException {
 
     LOG.info("Need to write " + limit +
              " bytes for erased location index " + erasedLocationToFix);
@@ -244,7 +256,7 @@ public class ReedSolomonDecoder extends Decoder {
     // Loop while the number of written bytes is less than the max.
     for (long written = 0; written < limit; ) {
       erasedLocations = readFromInputs(
-        inputs, erasedLocations, limit, reporter, parallelReader);
+        inputs, erasedLocations, limit, reporter, parallelReader, lightDecoder);
       if (decoded.length != erasedLocations.length) {
         decoded = new int[erasedLocations.length];
       }
@@ -285,7 +297,8 @@ public class ReedSolomonDecoder extends Decoder {
           int[] erasedLocations,
           long limit,
           Progressable reporter,
-          ParallelStreamReader parallelReader) throws IOException {
+          ParallelStreamReader parallelReader, 
+          boolean lightDecoder) throws IOException {
     ParallelStreamReader.ReadResult readResult;
     try {
       long start = System.currentTimeMillis();
@@ -310,6 +323,7 @@ public class ReedSolomonDecoder extends Decoder {
       }
 
       // Found a new erased location.
+      //TODO: Shouldn't it be >
       if (erasedLocations.length == paritySize) {
         String msg = "Too many read errors";
         LOG.error(msg);
@@ -325,6 +339,11 @@ public class ReedSolomonDecoder extends Decoder {
       erasedLocations = newErasedLocations;
     }
     readBufs = readResult.readBufs;
+    LOG.info("LALALA:  In readInputs, erasedLocations = "+convertToString(erasedLocations));
+    
+    if(lightDecoder&&(erasedLocations.length>1))
+    	throw new IOException("LIGHT DECODER FAILED");    
+       
     return erasedLocations;
   }
 

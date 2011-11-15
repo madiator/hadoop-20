@@ -245,6 +245,7 @@ abstract class BlockReconstructor extends Configured {
       try {
     	  for(int lightIterator = 0;lightIterator<2;lightIterator++) {    	  
 	    	  try {
+	    		  LOG.info("lostBlockOffset = "+lostBlockOffset);
 		        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
 		            parityPair.getPath(), blockSize,
 		            lostBlockOffset, localBlockFile,
@@ -260,8 +261,11 @@ abstract class BlockReconstructor extends Configured {
 		
 		      }catch(IOException e) {    	  
 		    	  // lightDecoder failed. 
-		    	  // So try the heavy version by setting lightDecoder parameter to false
-		    	  //if(e.getMessage().equals("LIGHTDECODERFAILED")) 
+		    	  // So try the heavy version by setting lightDecoder parameter to false		    	  
+		    	  if(lightIterator==0)
+		    		  LOG.error("Light Decoder failed. Trying the heavy decoder");
+		    	  else
+		    		  LOG.error("Unable to decode");
 		    	  lightDecoder = false; 
 		      }
 	      }
