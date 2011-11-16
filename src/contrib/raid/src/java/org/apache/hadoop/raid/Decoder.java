@@ -141,6 +141,15 @@ public abstract class Decoder {
       blockSize, errorOffset, limit, out, reporter, lightDecoder);
   }
 
+  void fixErasedBlock(
+	      FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
+	      long blockSize, long errorOffset, long limit,
+	      OutputStream out, Progressable reporter) throws IOException {
+	    configureBuffers(blockSize);
+	    fixErasedBlockImpl(fs, srcFile, parityFs, parityFile,
+	      blockSize, errorOffset, limit, out, reporter, false);
+	  }
+  
   /**
    * Implementation-specific mechanism of writing a fixed block.
    * @param fs The filesystem containing the source file.
