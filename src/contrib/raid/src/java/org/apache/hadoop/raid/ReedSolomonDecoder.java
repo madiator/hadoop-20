@@ -433,19 +433,14 @@ public class ReedSolomonDecoder extends Decoder {
 		}
 		else if (erasedLocation.length > 1){
 			for (int i = 0; i < stripeSize+paritySizeRS; i++){
-//				System.out.println("adds in:" +i);
-//				System.out.println("Locations to Fetch:" + Arrays.toString(locationsToFetch));
 				for (int j = 0; j<erasedLocation.length; j++){
 					if(erasedLocation[j]==paritySizeSRC+i){
 						flagErased = 1;
 					}
 				}
 				if (flagErased==0){
-//					System.out.println("Locations to Fetch befor addition:" + Arrays.toString(locationsToFetch));
-//					System.out.println("adds in:" +i);
 					locationsToFetch[paritySizeSRC+i]=1;
 					locationsLength++;
-//					System.out.println("Locations to Fetch after new block:" + Arrays.toString(locationsToFetch));
 					if (locationsLength==stripeSize)
 						return;
 				}
