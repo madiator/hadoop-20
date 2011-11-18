@@ -56,7 +56,7 @@ public class ReedSolomonDecoder extends Decoder {
       reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
     }
     decodeOps = new Semaphore(parallelism);
-    LOG.info("MAHESH initialized ReedSolomonDecoder" +
+    LOG.info("Initialized ReedSolomonDecoder" +
     		" with simpleParityDegree = "+simpleParityDegree);
   }
 
@@ -127,10 +127,8 @@ public class ReedSolomonDecoder extends Decoder {
     	  int[] erasedLocationsArray = new int[erasedLocations.size()];
     	  for(int i = 0; i < erasedLocations.size(); i++) {
     		  erasedLocationsArray[i] = erasedLocations.get(i);
-    	  }
-    	  LOG.info("LALALA:  erasedLocations = "+convertToString(erasedLocationsArray));   
-    	  blocksToFetch(erasedLocationsArray,locationsToFetch);
-    	  LOG.info("LALALA:  locationsToFetch = "+convertToString(locationsToFetch));   	
+    	  }    	     
+    	  blocksToFetch(erasedLocationsArray,locationsToFetch);    	     	
     	  for(int i = 0; i < locationsToFetch.length; i++) {
     		  FSDataInputStream in;    		    
     		 
@@ -167,12 +165,11 @@ public class ReedSolomonDecoder extends Decoder {
     		  }  		  
     		  
     	  }
-    	  LOG.info("Light decoder finished");
-    	  //throw new IOException("LIGHT DECODER FAILED");
+    	  LOG.info("Light decoder finished");    	  
       }
       else {
-    	  // Do the heavy decoding!
-    	  LOG.info("Begin Heavy Decoder");
+    	  // Do the heavy decoding - open all the remaining streams except the erasure.
+    	  LOG.info("Starting the full Decoder");
 	      // First open streams to the parity blocks.    	  
 	      for (int i = 0; i < paritySize; i++) {
 	        long offset = blockSize * (stripeIdx * paritySize + i);
@@ -401,28 +398,28 @@ public class ReedSolomonDecoder extends Decoder {
 		int locationsLength = 0;
 		double singleErasureGroup;
 
-
 		if (erasedLocation.length == 0) {
 			return;
 		}
-		// initialize the locations to fetch to
-		for (int i = 0; i<paritySizeSRC+paritySizeRS+stripeSize; i++){
+		// Initialize the locations to fetch to
+		for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
 			locationsToFetch[i]=0;
 		}
-		//first check if the is a single failure
-		if (erasedLocation.length == 1){
-			//find the simpleXOR group that the erased block is a member of
-			if (erasedLocation[0]>=paritySizeSRC){
+		// First check if the is a single failure
+		if (erasedLocation.length == 1) {
+			// Find the simpleXOR group that the erased block is a member of
+			if (erasedLocation[0]>=paritySizeSRC) {
 				singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
 			}
 			else{
 				singleErasureGroup = erasedLocation[0]+1;
 			}
-			// indicate the blocks that need to be communicated
-			for (int f = 0; f < simpleParityDegree; f++) {//parityRS and stripe blocks
+			// Indicate the blocks that need to be communicated
+			for (int f = 0; f < simpleParityDegree; f++) { 
+				// parityRS and stripe blocks
 				locationsToFetch[paritySizeSRC+((int)singleErasureGroup-1)*simpleParityDegree+f]=1;
 			}
-			locationsToFetch[(int)singleErasureGroup-1]=1;//simpleXOR block
+			locationsToFetch[(int)singleErasureGroup-1]=1; 		//SimpleXOR block
 			for (int i = 0; i<paritySizeSRC+paritySizeRS+stripeSize; i++){
 				if (i ==erasedLocation[0])
 				{
@@ -451,17 +448,5 @@ public class ReedSolomonDecoder extends Decoder {
 			}
 
 		}
-	}
-  
-  public void blocksToFetch2(int[] erasedLocation, int[] locationsToFetch) {
-	  for(int i=0;i<paritySize+stripeSize;i++) {
-		  if(i!=erasedLocation[0])
-			  locationsToFetch[i] = 1;
-		  else
-			  locationsToFetch[i] = 0;
-	  }
-  }
-  
-  
-  
+	}  
 }
