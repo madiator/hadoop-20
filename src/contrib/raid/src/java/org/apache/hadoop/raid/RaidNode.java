@@ -850,11 +850,14 @@ public abstract class RaidNode implements RaidProtocol {
     FileSystem srcFs = srcPath.getFileSystem(conf);
     FileStatus stat = srcFs.getFileStatus(srcPath);
     long limit = Math.min(stat.getBlockSize(), stat.getLen() - corruptOffset);
-    java.io.OutputStream out = destFs.create(recoveredBlock);
-    decoder.fixErasedBlock(srcFs, srcPath,
-        ppair.getFileSystem(), ppair.getPath(),
-        stat.getBlockSize(), corruptOffset, limit, out,
-        RaidUtils.NULL_PROGRESSABLE);
+    java.io.OutputStream out = destFs.create(recoveredBlock);    
+    
+	LOG.info("RaidNode starting with heavy decoder");
+	decoder.fixErasedBlock(srcFs, srcPath,
+	        ppair.getFileSystem(), ppair.getPath(),
+	        stat.getBlockSize(), corruptOffset, limit, out,
+	        RaidUtils.NULL_PROGRESSABLE, false);
+
     out.close();
     return recoveredBlock;
   }
