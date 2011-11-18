@@ -336,8 +336,8 @@ public class ReedSolomonDecoder extends Decoder {
       erasedLocations = newErasedLocations;
     }
     readBufs = readResult.readBufs;
-    LOG.info("LALALA:  In readInputs, erasedLocations = "+convertToString(erasedLocations));
     
+    // If there are more than one erasedLocations, let the heavy decoder take care of it. 
     if(lightDecoder&&(erasedLocations.length>1))
     	throw new IOException("LIGHT DECODER FAILED");    
        

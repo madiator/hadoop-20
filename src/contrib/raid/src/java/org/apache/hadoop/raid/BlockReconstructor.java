@@ -245,7 +245,7 @@ abstract class BlockReconstructor extends Configured {
       try {
     	  for(int lightIterator = 0;lightIterator<2;lightIterator++) {    	  
 	    	  try {
-	    		  LOG.info("LALALA lostBlockOffset = "+lostBlockOffset);
+	    		  LOG.info("lostBlockOffset = "+lostBlockOffset);
 		        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
 		            parityPair.getPath(), blockSize,
 		            lostBlockOffset, localBlockFile,
