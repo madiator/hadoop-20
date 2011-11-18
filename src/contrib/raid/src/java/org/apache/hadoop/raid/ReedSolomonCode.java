@@ -140,14 +140,12 @@ public class ReedSolomonCode implements ErasureCode {
 			else{
 				singleErasureGroup = erasedLocation[0]+1;
 			}
-			//System.out.println(Arrays.toString(dataRS));
+			
 			//and repair it
 			for (int f = 0; f < simpleParityDegree; f++) {
-				erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
-				//System.out.println("The erased value at iteration f = " + f + " is equal to " +erasedValue[0]);
+				erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);				
 			}
-			erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
-			//System.out.println("The erased value  is equal to " +erasedValue[0]);
+			erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);			
 		}
 	}
 
