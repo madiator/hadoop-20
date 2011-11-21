@@ -238,12 +238,11 @@ abstract class BlockReconstructor extends Configured {
         Math.min(blockSize, srcFileSize - lostBlockOffset);
       File localBlockFile =
         File.createTempFile(lostBlock.getBlockName(), ".tmp");
-      localBlockFile.deleteOnExit();
-      boolean doLightDecode = true;
-      
+      localBlockFile.deleteOnExit();      
+      boolean doLightDecodeOptions[] = {true, false};  
       
       try {
-    	  for(int lightIterator = 0;lightIterator<2;lightIterator++) {    	  
+    	  for(boolean doLightDecode:doLightDecodeOptions) {    	  
 	    	  try {
 	    		  LOG.info("lostBlockOffset = "+lostBlockOffset);
 		        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
@@ -257,16 +256,18 @@ abstract class BlockReconstructor extends Configured {
 		            lostBlock, blockContentsSize);
 		        
 		        numBlocksReconstructed++;
-		        break; //if this is successful, break out of the loop
+		        break; //If the block reconstruction was successful, break out of the loop
 		
 		      }catch(IOException e) {    	  
 		    	  // Light Decoder failed. 
-		    	  // So try the Heavy Decoder by setting doLightDecode parameter to false		    	  
-		    	  if(lightIterator==0)
+		    	  // So try the Heavy Decoder by setting doLightDecode parameter to false
+		    	  // The for loop will set this automatically.
+		    	  
+		    	  if(doLightDecode)
 		    		  LOG.error("Light Decoder failed. Trying the heavy decoder");
 		    	  else
 		    		  LOG.error("Unable to decode");
-		    	  doLightDecode = false; 
+		    	  
 		      }
 	      }
       }
