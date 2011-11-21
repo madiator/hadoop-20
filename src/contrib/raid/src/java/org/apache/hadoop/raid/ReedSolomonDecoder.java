@@ -447,5 +447,5 @@ public class ReedSolomonDecoder extends Decoder {
   			}
   		}
   	}
-  }  
+  }
 }
