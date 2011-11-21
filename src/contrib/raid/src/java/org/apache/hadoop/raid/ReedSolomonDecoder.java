@@ -391,8 +391,10 @@ public class ReedSolomonDecoder extends Decoder {
   }
   
   public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch) {  
-    int paritySizeRS = (simpleParityDegree)*(paritySize+stripeSize)/(simpleParityDegree+1)-stripeSize;
-    int paritySizeSRC = paritySize-paritySizeRS;
+    int paritySizeRS =  simpleParityDegree
+                        * (paritySize + stripeSize) / (simpleParityDegree + 1)
+                        - stripeSize;
+    int paritySizeSRC = paritySize - paritySizeRS;
     int flagErased = 0;
     int locationsLength = 0;
     double singleErasureGroup;
@@ -402,47 +404,47 @@ public class ReedSolomonDecoder extends Decoder {
     }
     // Initialize the locations to fetch to
     for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
-      locationsToFetch[i]=0;
+      locationsToFetch[i] = 0;
     }
     // First check if the is a single failure
     if (erasedLocation.length == 1) {
       // Find the simpleXOR group that the erased block is a member of
-      if (erasedLocation[0]>=paritySizeSRC) {        
-        singleErasureGroup = 
-          Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/
-              ((float)simpleParityDegree));
+      if (erasedLocation[0] >= paritySizeSRC) {        
+        singleErasureGroup = Math.ceil(
+                            ((float)(erasedLocation[0] - paritySizeSRC + 1)) /
+                            ((float)simpleParityDegree));
        }
       else{
-        singleErasureGroup = erasedLocation[0]+1;
+        singleErasureGroup = erasedLocation[0] + 1;
       }
       // Indicate the blocks that need to be communicated
       for (int f = 0; f < simpleParityDegree; f++) { 
         // parityRS and stripe blocks
-        locationsToFetch[paritySizeSRC+((int)singleErasureGroup-1)*simpleParityDegree+f]=1;
+        locationsToFetch[paritySizeSRC + 
+                         ((int)singleErasureGroup - 1) 
+                         * simpleParityDegree + f] = 1;
       }
-      locationsToFetch[(int)singleErasureGroup-1]=1; 		//SimpleXOR block
-  		for (int i = 0; i<paritySizeSRC+paritySizeRS+stripeSize; i++){
-  			if (i ==erasedLocation[0])
-  			{
+      locationsToFetch[(int)singleErasureGroup - 1] = 1; 		//SimpleXOR block
+  		for (int i = 0; i<paritySizeSRC + paritySizeRS + stripeSize; i++){
+  			if (i == erasedLocation[0]) {
   				locationsToFetch[i]=0;
   			}
   		}
     }
   	else if (erasedLocation.length > 1){
-  	  for (int i = 0; i < stripeSize+paritySizeRS; i++){
-  	    for (int j = 0; j<erasedLocation.length; j++){
-  	      if(erasedLocation[j]==paritySizeSRC+i){
+  	  for (int i = 0; i < stripeSize + paritySizeRS; i++) {
+  	    for (int j = 0; j < erasedLocation.length; j++){
+  	      if(erasedLocation[j] == paritySizeSRC + i){
   					flagErased = 1;
   				}
   			}
-  			if (flagErased==0){
-  				locationsToFetch[paritySizeSRC+i]=1;
+  			if (flagErased == 0) {
+  				locationsToFetch[paritySizeSRC + i] = 1;
   				locationsLength++;
-  				if (locationsLength==stripeSize)
+  				if (locationsLength == stripeSize)
   					return;
   			}
-  			else
-  			{
+  			else {
   				flagErased = 0;
   			}
   		}
