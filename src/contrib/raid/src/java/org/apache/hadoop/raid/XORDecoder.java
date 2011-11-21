@@ -44,7 +44,7 @@ public class XORDecoder extends Decoder {
   protected void fixErasedBlockImpl(
       FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
       long blockSize, long errorOffset, long limit,
-      OutputStream out, Progressable reporter, boolean lightDecoder) throws IOException {
+      OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException {
     LOG.info("Fixing block at " + srcFile + ":" + errorOffset +
              ", limit " + limit);
     FileStatus srcStat = fs.getFileStatus(srcFile);

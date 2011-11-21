@@ -80,7 +80,7 @@ public abstract class Encoder {
   }
   
   Encoder(Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
-	  this.simpleParityDegree = 3;
+	  this.simpleParityDegree = simpleParityDegree;
 	  EncoderCommon(conf, stripeSize, paritySize);
   }
   

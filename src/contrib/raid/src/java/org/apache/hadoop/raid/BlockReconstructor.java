@@ -239,7 +239,7 @@ abstract class BlockReconstructor extends Configured {
       File localBlockFile =
         File.createTempFile(lostBlock.getBlockName(), ".tmp");
       localBlockFile.deleteOnExit();
-      boolean lightDecoder = true;
+      boolean doLightDecode = true;
       
       
       try {
@@ -249,7 +249,7 @@ abstract class BlockReconstructor extends Configured {
 		        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
 		            parityPair.getPath(), blockSize,
 		            lostBlockOffset, localBlockFile,
-		            blockContentsSize, progress, lightDecoder);
+		            blockContentsSize, progress, doLightDecode);
 		
 		        // Now that we have recovered the file block locally, send it.
 		        String datanode = chooseDatanode(lb.getLocations());
@@ -260,13 +260,13 @@ abstract class BlockReconstructor extends Configured {
 		        break; //if this is successful, break out of the loop
 		
 		      }catch(IOException e) {    	  
-		    	  // lightDecoder failed. 
-		    	  // So try the heavy version by setting lightDecoder parameter to false		    	  
+		    	  // Light Decoder failed. 
+		    	  // So try the Heavy Decoder by setting doLightDecode parameter to false		    	  
 		    	  if(lightIterator==0)
 		    		  LOG.error("Light Decoder failed. Trying the heavy decoder");
 		    	  else
 		    		  LOG.error("Unable to decode");
-		    	  lightDecoder = false; 
+		    	  doLightDecode = false; 
 		      }
 	      }
       }

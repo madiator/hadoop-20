@@ -65,10 +65,10 @@ public class ReedSolomonDecoder extends Decoder {
       FileSystem fs, Path srcFile,
       FileSystem parityFs, Path parityFile,
        long blockSize, long errorOffset, long limit,
-       OutputStream out, Progressable reporter, boolean lightDecoder) throws IOException {
+       OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException {
     FSDataInputStream[] inputs = new FSDataInputStream[stripeSize + paritySize];
     int[] erasedLocations = buildInputs(fs, srcFile, parityFs, parityFile, 
-                                        errorOffset, inputs, lightDecoder);
+                                        errorOffset, inputs, doLightDecode);
     int blockIdxInStripe = ((int)(errorOffset/blockSize)) % stripeSize;
     int erasedLocationToFix = paritySize + blockIdxInStripe;
 
@@ -82,7 +82,7 @@ public class ReedSolomonDecoder extends Decoder {
     waitTime = 0;
     try {
       writeFixedBlock(inputs, erasedLocations, erasedLocationToFix,
-                      limit, out, reporter, parallelReader, lightDecoder);
+                      limit, out, reporter, parallelReader, doLightDecode);
     } finally {
       // Inputs will be closed by parallelReader.shutdown().
       parallelReader.shutdown();
@@ -95,7 +95,7 @@ public class ReedSolomonDecoder extends Decoder {
   protected int[] buildInputs(FileSystem fs, Path srcFile, 
                               FileSystem parityFs, Path parityFile,
                               long errorOffset, FSDataInputStream[] inputs, 
-                              boolean lightDecoder)
+                              boolean doLightDecode)
       throws IOException {
     LOG.info("Building inputs to recover block starting at " + errorOffset);
     try {
@@ -112,7 +112,7 @@ public class ReedSolomonDecoder extends Decoder {
     	  locationsToFetch[i] = 0;    	  
       }
     	  
-      if(lightDecoder) {
+      if(doLightDecode) {
     	  LOG.info("Starting with Light Decoder");
     	  for (int i = paritySize; i < paritySize + stripeSize; i++) {    		  
     		  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
