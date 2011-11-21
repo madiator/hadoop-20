@@ -244,7 +244,7 @@ public class ReedSolomonDecoder extends Decoder {
           OutputStream out,
           Progressable reporter,
           ParallelStreamReader parallelReader, 
-          boolean lightDecoder) throws IOException {
+          boolean doLightDecode) throws IOException {
 
     LOG.info("Need to write " + limit +
              " bytes for erased location index " + erasedLocationToFix);
@@ -253,7 +253,7 @@ public class ReedSolomonDecoder extends Decoder {
     // Loop while the number of written bytes is less than the max.
     for (long written = 0; written < limit; ) {
       erasedLocations = readFromInputs(
-        inputs, erasedLocations, limit, reporter, parallelReader, lightDecoder);
+        inputs, erasedLocations, limit, reporter, parallelReader, doLightDecode);
       if (decoded.length != erasedLocations.length) {
         decoded = new int[erasedLocations.length];
       }
@@ -295,7 +295,7 @@ public class ReedSolomonDecoder extends Decoder {
           long limit,
           Progressable reporter,
           ParallelStreamReader parallelReader, 
-          boolean lightDecoder) throws IOException {
+          boolean doLightDecode) throws IOException {
     ParallelStreamReader.ReadResult readResult;
     try {
       long start = System.currentTimeMillis();
@@ -338,7 +338,7 @@ public class ReedSolomonDecoder extends Decoder {
     readBufs = readResult.readBufs;
     
     // If there are more than one erasedLocations, let the heavy decoder take care of it. 
-    if(lightDecoder&&(erasedLocations.length>1))
+    if(doLightDecode&&(erasedLocations.length>1))
     	throw new IOException("LIGHT DECODER FAILED");    
        
     return erasedLocations;
