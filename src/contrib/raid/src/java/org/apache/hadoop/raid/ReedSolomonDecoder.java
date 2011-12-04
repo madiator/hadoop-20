@@ -111,98 +111,57 @@ public class ReedSolomonDecoder extends Decoder {
       for(int i=0;i<paritySize+stripeSize;i++) {
     	  locationsToFetch[i] = 0;    	  
       }
-    	  
-      if(doLightDecode) {
-    	  LOG.info("Starting with Light Decoder");
-    	  for (int i = paritySize; i < paritySize + stripeSize; i++) {    		  
-    		  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
-    		  if (offset == errorOffset) {
-		          LOG.info(srcFile + ":" + offset +
-		              " is known to have error, adding zeros as input " + i);
-		          inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
-		              offset + blockSize));
-		          erasedLocations.add(i);
-    		  }
-    	  }
-    	  int[] erasedLocationsArray = new int[erasedLocations.size()];
-    	  for(int i = 0; i < erasedLocations.size(); i++) {
-    		  erasedLocationsArray[i] = erasedLocations.get(i);
-    	  }    	     
-    	  blocksToFetch(erasedLocationsArray,locationsToFetch);    	     	
-    	  for(int i = 0; i < locationsToFetch.length; i++) {
-    		  FSDataInputStream in;    		    
-    		 
-    		  if(i<paritySize) {
-    			  long offset = blockSize * (stripeIdx * paritySize + i);
-    			  if(locationsToFetch[i]>0) {
-	    			  in = parityFs.open(
-	    			          parityFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-	    			  LOG.info("Adding " + parityFile + ":" + offset + " as input " + i);
-	    			  in.seek(offset);
-	        		  inputs[i] = in;
-    			  }
-    			  else {
-    				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
-    			              offset + blockSize));
-    				  
-    				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
-    			  }
-    		  }else {
-    			  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
-    			  if(locationsToFetch[i]>0) {
-	    			  in = fs.open(
-	    			            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-	    			  LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
-	    			  in.seek(offset);
-	        		  inputs[i] = in;
-    			  }
-    			  else {
-    				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
-    			              offset + blockSize));
-    				  
-    				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
-    			  }
-    		  }  		  
-    		  
-    	  }
-    	  LOG.info("Light decoder finished");    	  
-      }
-      else {
-    	  // Do the heavy decoding - open all the remaining streams except the erasure.
-    	  LOG.info("Starting the full Decoder");
-	      // First open streams to the parity blocks.    	  
-	      for (int i = 0; i < paritySize; i++) {
-	        long offset = blockSize * (stripeIdx * paritySize + i);
-	        FSDataInputStream in = parityFs.open(
-	          parityFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-	        in.seek(offset);
-	        LOG.info("Adding " + parityFile + ":" + offset + " as input " + i);
-	        inputs[i] = in;
-	      }
-	      // Now open streams to the data blocks.      
-	      for (int i = paritySize; i < paritySize + stripeSize; i++) {
-	        long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
-	        if (offset == errorOffset) {
+      
+  	  for (int i = paritySize; i < paritySize + stripeSize; i++) {    		  
+  		  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
+  		  if (offset == errorOffset) {
 	          LOG.info(srcFile + ":" + offset +
 	              " is known to have error, adding zeros as input " + i);
 	          inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
 	              offset + blockSize));
 	          erasedLocations.add(i);
-	        } else if (offset > srcStat.getLen()) {
-	          LOG.info(srcFile + ":" + offset +
-	                   " is past file size, adding zeros as input " + i);
-	          inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
-	              offset + blockSize));
-	        } else {
-	          FSDataInputStream in = fs.open(
-	            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-	          in.seek(offset);
-	          LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
-	          inputs[i] = in;
-	        }
-	      }
-	      LOG.info("Heavy Decoder finished");
-      }
+  		  }
+  	  }
+  	  int[] erasedLocationsArray = new int[erasedLocations.size()];
+  	  for(int i = 0; i < erasedLocations.size(); i++) {
+  		  erasedLocationsArray[i] = erasedLocations.get(i);
+  	  }
+  	  blocksToFetch(erasedLocationsArray,locationsToFetch, doLightDecode);    	     	
+  	  for(int i = 0; i < locationsToFetch.length; i++) {
+  		  FSDataInputStream in;  		 
+  		  if(i<paritySize) {
+  			  long offset = blockSize * (stripeIdx * paritySize + i);
+  			  if(locationsToFetch[i]>0) {
+    			  in = parityFs.open(
+    			          parityFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+    			  LOG.info("Adding " + parityFile + ":" + offset + " as input " + i);
+    			  in.seek(offset);
+        		  inputs[i] = in;
+  			  }
+  			  else {
+  				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
+  			              offset + blockSize));
+  				  
+  				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
+  			  }
+  		  }else {
+  			  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
+  			  if(locationsToFetch[i]>0) {
+    			  in = fs.open(
+    			            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+    			  LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
+    			  in.seek(offset);
+        		  inputs[i] = in;
+  			  }
+  			  else {
+  				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
+  			              offset + blockSize));
+  				  
+  				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
+  			  }
+  		  }
+  	  }    
+      
       if (erasedLocations.size() > paritySize) {
         String msg = "Too many erased locations: " + erasedLocations.size();
         LOG.error(msg);
@@ -390,7 +349,8 @@ public class ReedSolomonDecoder extends Decoder {
     }
   }
   
-  public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch) {  
+  public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch, 
+      boolean doLightDecode) {  
     int paritySizeRS =  simpleParityDegree
                         * (paritySize + stripeSize) / (simpleParityDegree + 1)
                         - stripeSize;
@@ -398,7 +358,14 @@ public class ReedSolomonDecoder extends Decoder {
     int flagErased = 0;
     int locationsLength = 0;
     double singleErasureGroup;
-
+    
+    if(!doLightDecode) {
+      for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
+        locationsToFetch[i] = 1;
+      }
+      return;
+    }
+    
     if (erasedLocation.length == 0) {
       return;
     }
