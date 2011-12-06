@@ -40,8 +40,7 @@ public class TestErasureCodes extends TestCase {
         paritySizeSRC = RAND.nextInt(5) + 1; //1, 2, 3, 4, 5, 6
         simpleParityDegree = RAND.nextInt(9) + 2;
         paritySizeRS = simpleParityDegree*paritySizeSRC - stripeSize;
-      }              
-      
+      }      
       
       int paritySize = paritySizeRS + paritySizeSRC;      
       
