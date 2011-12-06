@@ -36,15 +36,15 @@ public class ReedSolomonCode implements ErasureCode {
 	private final int[] dataBuff;
 
   public ReedSolomonCode(int stripeSize, int paritySize, int simpleParityDegree) {
-	  	assert(stripeSize + paritySize < GF.getFieldSize());
-		this.stripeSize 			= stripeSize;//k
-		this.paritySize 			= paritySize;//n-k = n'/f+n'-k
-		this.simpleParityDegree		= simpleParityDegree;
-		this.paritySizeRS 			= ((simpleParityDegree)*(paritySize+stripeSize))/(simpleParityDegree+1) - stripeSize ; // n' = (f+1)/f*n-k
-		this.paritySizeSRC 			= paritySize-paritySizeRS;//n'/f;
-		this.errSignature 			= new int[paritySizeRS];
-		this.paritySymbolLocations 	= new int[paritySizeRS+paritySizeSRC];
-		this.dataBuff 				= new int[paritySizeRS + stripeSize];
+	  assert(stripeSize + paritySize < GF.getFieldSize());
+		this.stripeSize = stripeSize;//k
+		this.paritySize = paritySize;//n-k = n'/f+n'-k
+		this.simpleParityDegree	= simpleParityDegree;
+		this.paritySizeRS	= ((simpleParityDegree)*(paritySize+stripeSize))/(simpleParityDegree+1) - stripeSize ; // n' = (f+1)/f*n-k
+		this.paritySizeSRC = paritySize-paritySizeRS;//n'/f;
+		this.errSignature = new int[paritySizeRS];
+		this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
+		this.dataBuff = new int[paritySizeRS + stripeSize];
 		
 		for (int i = 0; i < paritySizeRS+paritySizeSRC; i++) {
 			paritySymbolLocations[i] = i;

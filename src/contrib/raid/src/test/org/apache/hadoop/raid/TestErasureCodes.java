@@ -29,10 +29,23 @@ public class TestErasureCodes extends TestCase {
   final Random RAND = new Random();
 
   public void testEncodeDecode() {
-    for (int n = 0; n < TEST_CODES; n++) {
-      int stripeSize = RAND.nextInt(99) + 1; // 1, 2, 3, ... 100
-      int paritySize = RAND.nextInt(9) + 1; //1, 2, 3, 4, ... 10
-      ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize);
+    int stripeSize = 10;
+    int paritySizeSRC = 2;
+    int paritySizeRS = 4;
+    int simpleParityDegree = 7;
+    for (int n = 0; n < TEST_CODES; n++) {      
+      paritySizeRS = 0;
+      while(paritySizeRS<=0) {
+        stripeSize = RAND.nextInt(98) + 2; // 2, 2, 3, ... 100
+        paritySizeSRC = RAND.nextInt(5) + 1; //1, 2, 3, 4, 5, 6
+        simpleParityDegree = RAND.nextInt(9) + 2;
+        paritySizeRS = simpleParityDegree*paritySizeSRC - stripeSize;
+      }              
+      
+      
+      int paritySize = paritySizeRS + paritySizeSRC;      
+      
+      ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
       for (int m = 0; m < TEST_TIMES; m++) {
         int symbolMax = (int) Math.pow(2, ec.symbolSize());
         int[] message = new int[stripeSize];
@@ -68,7 +81,8 @@ public class TestErasureCodes extends TestCase {
   public void testRSPerformance() {
     int stripeSize = 10;
     int paritySize = 4;
-    ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize);
+    int simpleParityDegree = 7;
+    ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
     int symbolMax = (int) Math.pow(2, ec.symbolSize());
     byte[][] message = new byte[stripeSize][];
     int bufsize = 1024 * 1024 * 10;
@@ -172,12 +186,13 @@ public class TestErasureCodes extends TestCase {
 
   public void testComputeErrorLocations() {
     for (int i = 0; i < TEST_TIMES; ++i) {
-      verifyErrorLocations(10, 4, 1);
-      verifyErrorLocations(10, 4, 2);
+      verifyErrorLocations(10, 4, 7, 1);
+      verifyErrorLocations(10, 4, 7, 2);
     }
   }
 
-  public void verifyErrorLocations(int stripeSize, int paritySize, int errors) {
+  public void verifyErrorLocations(int stripeSize, int paritySize, 
+      int simpleParityDegree, int errors) {
     int[] message = new int[stripeSize];
     int[] parity = new int[paritySize];
     Set<Integer> errorLocations = new HashSet<Integer>();
@@ -188,7 +203,7 @@ public class TestErasureCodes extends TestCase {
       int loc = RAND.nextInt(stripeSize + paritySize);
       errorLocations.add(loc);
     }
-    ReedSolomonCode codec = new ReedSolomonCode(stripeSize, paritySize);
+    ReedSolomonCode codec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
     codec.encode(message, parity);
     int[] data = combineArrays(parity, message);
     for (Integer i : errorLocations) {

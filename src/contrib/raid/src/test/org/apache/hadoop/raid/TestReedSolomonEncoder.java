@@ -61,6 +61,7 @@ public class TestReedSolomonEncoder extends TestCase {
     mySetup();
     int stripeSize = 10;
     int paritySize = 4;
+    int simpleParityDegree = 7;
     long blockSize = 8192;
     Path file1 = new Path("/user/raidtest/file1");
     Path parityFile1 = new Path("/rsraid/user/raidtest/file1");
@@ -68,7 +69,7 @@ public class TestReedSolomonEncoder extends TestCase {
                                                           1, 25, blockSize);
     try {
       ReedSolomonEncoder encoder = new ReedSolomonEncoder(
-        conf, stripeSize, paritySize);
+        conf, stripeSize, paritySize, simpleParityDegree);
       short parityRepl = 1;
       encoder.encodeFile(fileSys, file1, fileSys, parityFile1, parityRepl,
         Reporter.NULL);
