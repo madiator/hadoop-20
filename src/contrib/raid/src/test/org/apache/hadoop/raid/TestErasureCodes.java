@@ -24,8 +24,8 @@ import java.util.Set;
 import junit.framework.TestCase;
 
 public class TestErasureCodes extends TestCase {
-  final int TEST_CODES = 100;
-  final int TEST_TIMES = 1000;
+  final int TEST_CODES = 1; //was 100
+  final int TEST_TIMES = 1; //was 1000
   final Random RAND = new Random();
 
   public void testEncodeDecode() {
@@ -34,18 +34,21 @@ public class TestErasureCodes extends TestCase {
     int paritySizeRS = 4;
     int simpleParityDegree = 7;
     for (int n = 0; n < TEST_CODES; n++) {      
-      paritySizeRS = 0;
-      while(paritySizeRS<=0) {
+      //paritySizeRS = 0;
+      /*while(paritySizeRS<=0) {
         stripeSize = RAND.nextInt(98) + 2; // 2, 2, 3, ... 100
         paritySizeSRC = RAND.nextInt(5) + 1; //1, 2, 3, 4, 5, 6
         simpleParityDegree = RAND.nextInt(9) + 2;
         paritySizeRS = simpleParityDegree*paritySizeSRC - stripeSize;
-      }      
+      } */     
       
       int paritySize = paritySizeRS + paritySizeSRC;      
       
       ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
       for (int m = 0; m < TEST_TIMES; m++) {
+        System.out.println("stripeSize = "+stripeSize);
+        System.out.println("paritySize = "+paritySize);
+        System.out.println("simpleParityDegree = "+simpleParityDegree);
         int symbolMax = (int) Math.pow(2, ec.symbolSize());
         int[] message = new int[stripeSize];
         for (int i = 0; i < stripeSize; i++) {
@@ -63,7 +66,9 @@ public class TestErasureCodes extends TestCase {
           data[i + paritySize] = message[i];
           copy[i + paritySize] = message[i];
         }
-        int erasedLen = paritySize == 1 ? 1 : RAND.nextInt(paritySize - 1) + 1;
+        //int erasedLen = paritySizeRS == 1 ? 1 : RAND.nextInt(paritySizeRS - 1) + 1;
+        int erasedLen = paritySizeRS;
+        System.out.println("erasedLen = "+erasedLen+", paritySizeRS = "+paritySizeRS);
         int[] erasedLocations = randomErasedLocation(erasedLen, data.length);
         for (int i = 0; i < erasedLocations.length; i++) {
           data[erasedLocations[i]] = 0;
@@ -79,9 +84,10 @@ public class TestErasureCodes extends TestCase {
 
   public void testRSPerformance() {
     int stripeSize = 10;
-    int paritySize = 4;
+    int paritySize = 6;
     int simpleParityDegree = 7;
-    ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
+    ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, 
+        simpleParityDegree);
     int symbolMax = (int) Math.pow(2, ec.symbolSize());
     byte[][] message = new byte[stripeSize][];
     int bufsize = 1024 * 1024 * 10;

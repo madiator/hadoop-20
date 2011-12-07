@@ -85,7 +85,7 @@ public class ReedSolomonCode implements ErasureCode {
 			dataBuff[i + paritySizeRS] = message[i];
 		}
 		for (int i = 0; i < paritySizeSRC; i++) {
-			for (int f = 0; f < simpleParityDegree; f++) {				
+			for (int f = 0; f < simpleParityDegree; f++) {
 				parity[i] = GF.add(dataBuff[i*simpleParityDegree+f], parity[i]);
 			}
 		}
@@ -106,20 +106,25 @@ public class ReedSolomonCode implements ErasureCode {
 		// create a copy of the RS data
 		for (int i = paritySizeSRC; i < stripeSize+paritySizeRS+paritySizeSRC; i++) {
 			dataRS[i-paritySizeSRC] = data[i];
-		}
+		}		
 		if (erasedLocation.length > 1) {
 			// first check for any RS lost elements and repair them
+		  int count = 0;
 			for (int i = 0; i < erasedLocation.length; i++) {
-
 				if (erasedLocation[i]>=paritySizeSRC){// if it is an RS block erasure
-					errSignature[i] = primitivePower[erasedLocation[i]-paritySizeSRC];
-					erasedValue[i] = GF.substitute(dataRS, primitivePower[erasedLocationLengthRS]);
+					errSignature[count] = primitivePower[erasedLocation[i]-paritySizeSRC];
+					erasedValue[count] = GF.substitute(dataRS, primitivePower[count]);
+					count++;
 					erasedLocationLengthRS++;
 				}
 			}
-			GF.solveVandermondeSystem(errSignature, erasedValue, erasedLocationLengthRS);
-			for (int i = 0; i < erasedLocationLengthRS; i++) {
-				dataRS[erasedLocation[i]-paritySizeSRC] = erasedValue[i];
+		
+			GF.solveVandermondeSystem(errSignature, erasedValue, 
+			    erasedLocationLengthRS);
+			count = 0;
+			for (int j = 0; j < erasedLocation.length; j++) {
+			  if(erasedLocation[j] >= paritySizeSRC)
+			    dataRS[erasedLocation[j]-paritySizeSRC] = erasedValue[count++];
 			}
 			// then check if there are any simple XORs erased
 			for (int i = 0; i < erasedLocation.length; i++) {
@@ -128,7 +133,6 @@ public class ReedSolomonCode implements ErasureCode {
 						erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
 					}
 				}
-
 			}
 		}
 		// if there is only a single lost node
