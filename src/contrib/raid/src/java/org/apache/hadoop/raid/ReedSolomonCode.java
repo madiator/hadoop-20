@@ -126,6 +126,7 @@ public class ReedSolomonCode implements ErasureCode {
 			  if(erasedLocation[j] >= paritySizeSRC)
 			    dataRS[erasedLocation[j]-paritySizeSRC] = erasedValue[count++];
 			}
+			
 			// then check if there are any simple XORs erased
 			for (int i = 0; i < erasedLocation.length; i++) {
 				if (erasedLocation[i]<paritySizeSRC){
