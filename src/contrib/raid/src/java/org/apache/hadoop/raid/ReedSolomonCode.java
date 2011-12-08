@@ -92,67 +92,82 @@ public class ReedSolomonCode implements ErasureCode {
 	}
 
   @Override
-	public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
+  public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
 
-		int[] dataRS = new int[paritySizeRS+stripeSize];
-		int erasedLocationLengthRS = 0;		
-		double singleErasureGroup = 0;
+    int[] dataRS = new int[paritySizeRS+stripeSize];
+    int[] erasedValueRS = new int[paritySizeRS];
+    int erasedLocationLengthRS = 0;        
+    double singleErasureGroup = 0;
 
-		if (erasedLocation.length == 0) {
-			return;
-		}
-		assert(erasedLocation.length == erasedValue.length);
+    if (erasedLocation.length == 0) {
+        return;
+    }
+    assert(erasedLocation.length == erasedValue.length);
 
-		// create a copy of the RS data
-		for (int i = paritySizeSRC; i < stripeSize+paritySizeRS+paritySizeSRC; i++) {
-			dataRS[i-paritySizeSRC] = data[i];
-		}		
-		if (erasedLocation.length > 1) {
-			// first check for any RS lost elements and repair them
-		  int count = 0;
-			for (int i = 0; i < erasedLocation.length; i++) {
-				if (erasedLocation[i]>=paritySizeSRC){// if it is an RS block erasure
-					errSignature[count] = primitivePower[erasedLocation[i]-paritySizeSRC];
-					erasedValue[count] = GF.substitute(dataRS, primitivePower[count]);
-					count++;
-					erasedLocationLengthRS++;
-				}
-			}
-		
-			GF.solveVandermondeSystem(errSignature, erasedValue, 
-			    erasedLocationLengthRS);
-			count = 0;
-			for (int j = 0; j < erasedLocation.length; j++) {
-			  if(erasedLocation[j] >= paritySizeSRC)
-			    dataRS[erasedLocation[j]-paritySizeSRC] = erasedValue[count++];
-			}
-			
-			// then check if there are any simple XORs erased
-			for (int i = 0; i < erasedLocation.length; i++) {
-				if (erasedLocation[i]<paritySizeSRC){
-					for (int f = 0; f < simpleParityDegree; f++) {
-						erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
-					}
-				}
-			}
-		}
-		// if there is only a single lost node
-		else if (erasedLocation.length == 1){
-			// find its XOR group 
-			if (erasedLocation[0]>=paritySizeSRC){
-				singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
-			}
-			else{
-				singleErasureGroup = erasedLocation[0]+1;
-			}
-			
-			//and repair it
-			for (int f = 0; f < simpleParityDegree; f++) {
-				erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);				
-			}
-			erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);			
-		}
-	}
+    //make sure erased data are set to 0
+    for (int i = 0; i < erasedLocation.length; i++) {
+        data[erasedLocation[i]] = 0;
+    }
+    // create a copy of the RS data
+    for (int i = paritySizeSRC; i < stripeSize+paritySizeRS+paritySizeSRC; i++) {
+        dataRS[i-paritySizeSRC] = data[i];            
+    }
+    //if more than 1 failure, do RS decode and reconstruct simpleXOR parities if needed
+    if (erasedLocation.length > 1){
+        //find the number of RS failures
+        for (int i = 0; i < erasedLocation.length; i++) {
+          if (erasedLocation[i]>=paritySizeSRC) { //if it is an RS block erasure
+            erasedLocationLengthRS++;
+          }
+        }
+          
+        if (erasedLocationLengthRS >= 1) { //if there are RS failures
+          int count = 0;            
+            for (int i = 0; i < erasedLocation.length; i++) {
+              if (erasedLocation[i]>=paritySizeSRC){// if it is an RS block erasure 
+                errSignature[count] = primitivePower[erasedLocation[i]-paritySizeSRC];
+                erasedValueRS[count] = GF.substitute(dataRS, primitivePower[count]);
+                count++;                
+              }
+            }
+            GF.solveVandermondeSystem(errSignature, erasedValueRS, erasedLocationLengthRS);
+            count = 0;
+            for (int j = 0; j < erasedLocation.length; j++) {
+              if(erasedLocation[j] >= paritySizeSRC) {
+                dataRS[erasedLocation[j]-paritySizeSRC] = erasedValueRS[count];
+                erasedValue[j] = erasedValueRS[count]; 
+                count++;
+              }              
+            }            
+        }
+
+        // then check if there are any simpleXOR parities erased
+        for (int i = 0; i < erasedLocation.length; i++) {
+            if (erasedLocation[i]<paritySizeSRC){
+                for (int f = 0; f < simpleParityDegree; f++) {
+                    erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
+                }
+            }
+        }
+    }
+
+    // if there is only a single lost node
+    else if (erasedLocation.length == 1){
+        // find its XOR group 
+        if (erasedLocation[0]>=paritySizeSRC){
+            singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
+        }
+        else{
+            singleErasureGroup = erasedLocation[0]+1;
+        }
+        //System.out.println(Arrays.toString(dataRS));
+        //and repair it
+        for (int f = 0; f < simpleParityDegree; f++) {
+            erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
+        }
+        erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
+    }
+}
 
   @Override
   public int stripeSize() {
@@ -185,12 +200,12 @@ public class ReedSolomonCode implements ErasureCode {
       Set<Integer> errorLocations) {
     assert(data.length == paritySize + stripeSize && errorLocations != null);
     errorLocations.clear();
-    int maxError = paritySize / 2;
+    int maxError = paritySizeRS / 2;
     int[][] syndromeMatrix = new int[maxError][];
     for (int i = 0; i < syndromeMatrix.length; ++i) {
       syndromeMatrix[i] = new int[maxError + 1];
     }
-    int[] syndrome = new int[paritySize];
+    int[] syndrome = new int[paritySizeRS];
 
     if (computeSyndrome(data, syndrome)) {
       // Parity check OK. No error location added.
@@ -235,7 +250,7 @@ public class ReedSolomonCode implements ErasureCode {
    */
   private boolean computeSyndrome(int[] data, int [] syndrome) {
     boolean corruptionFound = false;
-    for (int i = 0; i < paritySize; i++) {
+    for (int i = 0; i < paritySizeRS; i++) {
       syndrome[i] = GF.substitute(data, primitivePower[i]);
       if (syndrome[i] != 0) {
         corruptionFound = true;
