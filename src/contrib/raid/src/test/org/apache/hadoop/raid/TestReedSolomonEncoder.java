@@ -60,7 +60,7 @@ public class TestReedSolomonEncoder extends TestCase {
   public void testEncoder() throws Exception {
     mySetup();
     int stripeSize = 10;
-    int paritySize = 4;
+    int paritySize = 6;
     int simpleParityDegree = 7;
     long blockSize = 8192;
     Path file1 = new Path("/user/raidtest/file1");

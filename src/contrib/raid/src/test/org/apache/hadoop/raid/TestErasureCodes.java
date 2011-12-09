@@ -67,6 +67,7 @@ public class TestErasureCodes extends TestCase {
         //int erasedLen = paritySizeRS;
         //System.out.println("erasedLen = "+erasedLen+", paritySizeRS = "+paritySizeRS);
         int[] erasedLocations = randomErasedLocation(erasedLen, data.length);
+        
         for (int i = 0; i < erasedLocations.length; i++) {
           data[erasedLocations[i]] = 0;
         }
