@@ -116,8 +116,8 @@ public class TestErasureCodes extends TestCase {
 
     // Copy erased array.
     int[] data = new int[paritySize + stripeSize];
-    // 4th location is the 0th symbol in the message
-    int[] erasedLocations = new int[]{4, 1, 5, 7};
+    // 6th location is the 0th symbol in the message
+    int[] erasedLocations = new int[]{6};//{4, 1, 5, 7};
     int[] erasedValues = new int[erasedLocations.length];
     byte[] copy = new byte[bufsize];
     for (int j = 0; j < bufsize; j++) {
@@ -136,8 +136,14 @@ public class TestErasureCodes extends TestCase {
         data[j + paritySize] = 0x000000FF & message[j][i];
       }
       // Use 0, 2, 3, 6, 8, 9, 10, 11, 12, 13th symbol to reconstruct the data
+      erasedValues[0] = 0;
       ec.decode(data, erasedLocations, erasedValues);
       message[0][i] = (byte)erasedValues[0];
+      int alpha = message[0][i];
+      int beta = copy[i];
+      if(message[0][i]!=copy[i]) {
+        System.out.println("decoded stuff differs"+alpha+","+ (0x000000FF & alpha)+","+beta+","+(0x000000FF & beta));
+      }
     }
     long decodeEnd = System.currentTimeMillis();
     float decodeMSecs = (decodeEnd - decodeStart);

@@ -40,8 +40,8 @@ public class ReedSolomonCode implements ErasureCode {
 		this.stripeSize = stripeSize;//k
 		this.paritySize = paritySize;//n-k = n'/f+n'-k
 		this.simpleParityDegree	= simpleParityDegree;
-		this.paritySizeRS	= ((simpleParityDegree)*(paritySize+stripeSize))/(simpleParityDegree+1) - stripeSize ; // n' = (f+1)/f*n-k
-		this.paritySizeSRC = paritySize-paritySizeRS;//n'/f;
+		this.paritySizeSRC = (stripeSize + paritySize)/(simpleParityDegree + 1);
+		this.paritySizeRS = paritySize - paritySizeSRC;		
 		this.errSignature = new int[paritySizeRS];
 		this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
 		this.dataBuff = new int[paritySizeRS + stripeSize];
@@ -103,7 +103,9 @@ public class ReedSolomonCode implements ErasureCode {
         return;
     }
     assert(erasedLocation.length == erasedValue.length);
-
+    //for(int i = 0; i < erasedValue.length; i++)
+    //  erasedValue[i] = 0;
+    
     //make sure erased data are set to 0
     for (int i = 0; i < erasedLocation.length; i++) {
         data[erasedLocation[i]] = 0;
@@ -144,6 +146,7 @@ public class ReedSolomonCode implements ErasureCode {
         // then check if there are any simpleXOR parities erased
         for (int i = 0; i < erasedLocation.length; i++) {
             if (erasedLocation[i]<paritySizeSRC){
+              //erasedValue[i] = 0;
                 for (int f = 0; f < simpleParityDegree; f++) {
                     erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
                 }
@@ -162,7 +165,8 @@ public class ReedSolomonCode implements ErasureCode {
         }
         //System.out.println(Arrays.toString(dataRS));
         //and repair it
-        for (int f = 0; f < simpleParityDegree; f++) {
+        //erasedValue[0] = 0;
+        for (int f = 0; f < simpleParityDegree; f++) {          
             erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
         }
         erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
