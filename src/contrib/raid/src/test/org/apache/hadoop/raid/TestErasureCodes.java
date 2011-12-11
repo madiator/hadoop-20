@@ -40,11 +40,11 @@ public class TestErasureCodes extends TestCase {
       stripeSize = RAND.nextInt(paritySizeSRC * simpleParityDegree - 2) + 2;
       paritySizeRS = paritySizeSRC * simpleParityDegree - stripeSize;
       paritySize = paritySizeRS + paritySizeSRC;
-      System.out.println(stripeSize+", " +
-      		+paritySize+", "+
-      		+paritySizeRS+", "+
-      		+paritySizeSRC+", "+
-      		+simpleParityDegree);
+      //System.out.println(stripeSize+", " +
+      //		+paritySize+", "+
+      //		+paritySizeRS+", "+
+      //		+paritySizeSRC+", "+
+      //		+simpleParityDegree);
 
       ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
       for (int m = 0; m < TEST_TIMES; m++) {
@@ -84,8 +84,8 @@ public class TestErasureCodes extends TestCase {
 
   public void testRSPerformance() {
     int stripeSize = 10;
-    int paritySize = 6;
-    int simpleParityDegree = 7;
+    int paritySize = 4;
+    int simpleParityDegree = 6;
     ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize,
         simpleParityDegree);
     int symbolMax = (int) Math.pow(2, ec.symbolSize());
@@ -118,8 +118,9 @@ public class TestErasureCodes extends TestCase {
 
     // Copy erased array.
     int[] data = new int[paritySize + stripeSize];
-    // 6th location is the 0th symbol in the message
-    int[] erasedLocations = new int[]{6, 1, 5, 7};
+    // The 0th symbol in the message is at paritySize
+    // make sure the below indices work.
+    int[] erasedLocations = new int[]{paritySize, 1};//, 5, 7};
     int[] erasedValues = new int[erasedLocations.length];
     byte[] copy = new byte[bufsize];
     for (int j = 0; j < bufsize; j++) {
@@ -137,15 +138,8 @@ public class TestErasureCodes extends TestCase {
       for (int j = 1; j < stripeSize; j++) {
         data[j + paritySize] = 0x000000FF & message[j][i];
       }
-      // Use 0, 2, 3, 6, 8, 9, 10, 11, 12, 13th symbol to reconstruct the data
-      //erasedValues[0] = 0;
       ec.decode(data, erasedLocations, erasedValues);
       message[0][i] = (byte)erasedValues[0];
-      int alpha = message[0][i];
-      int beta = copy[i];
-      if(message[0][i]!=copy[i]) {
-        System.out.println("decoded stuff differs"+alpha+","+ (0x000000FF & alpha)+","+beta+","+(0x000000FF & beta));
-      }
     }
     long decodeEnd = System.currentTimeMillis();
     float decodeMSecs = (decodeEnd - decodeStart);
