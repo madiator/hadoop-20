@@ -24,8 +24,8 @@ import java.util.Set;
 import junit.framework.TestCase;
 
 public class TestErasureCodes extends TestCase {
-  final int TEST_CODES = 1;
-  final int TEST_TIMES = 1;
+  final int TEST_CODES = 100;
+  final int TEST_TIMES = 1000;
   final Random RAND = new Random();
 
   public void testEncodeDecode() {
@@ -33,12 +33,12 @@ public class TestErasureCodes extends TestCase {
     int paritySizeSRC = 2;
     int paritySizeRS = 4;
     int simpleParityDegree = 7;
-    int paritySize = 0;
+    int paritySize = paritySizeRS + paritySizeSRC;
     for (int n = 0; n < TEST_CODES; n++) {
-      //simpleParityDegree = RAND.nextInt(4) + 2;   //2, 3, 4, 5, 6
-      //paritySizeSRC = RAND.nextInt(3) + 2;        //2, 3, 4
-      //stripeSize = RAND.nextInt(paritySizeSRC * simpleParityDegree - 2) + 2;
-      //paritySizeRS = paritySizeSRC * simpleParityDegree - stripeSize;
+      simpleParityDegree = RAND.nextInt(10) + 2;   //2, 3, 4, ..., 11
+      paritySizeSRC = RAND.nextInt(5) + 2;        //2, 3, 4, 5, 6
+      stripeSize = RAND.nextInt(paritySizeSRC * simpleParityDegree - 2) + 2;
+      paritySizeRS = paritySizeSRC * simpleParityDegree - stripeSize;
       paritySize = paritySizeRS + paritySizeSRC;
       //System.out.println(stripeSize+", " +
       //		+paritySize+", "+
@@ -65,12 +65,8 @@ public class TestErasureCodes extends TestCase {
           data[i + paritySize] = message[i];
           copy[i + paritySize] = message[i];
         }
-        //int erasedLen = paritySizeRS == 1 ? 1 : RAND.nextInt(paritySizeRS - 1) + 1;
-        //int erasedLen = paritySizeRS;
-        //System.out.println("erasedLen = "+erasedLen+", paritySizeRS = "+paritySizeRS);
-        //int[] erasedLocations = randomErasedLocation(erasedLen, data.length);
-        int[] erasedLocations = new int[]{0, 10};
-        int erasedLen = erasedLocations.length;
+        int erasedLen = paritySizeRS == 1 ? 1 : RAND.nextInt(paritySizeRS - 1) + 1;
+        int[] erasedLocations = randomErasedLocation(erasedLen, data.length);
         for (int i = 0; i < erasedLocations.length; i++) {
           data[erasedLocations[i]] = 0;
         }
