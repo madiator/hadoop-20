@@ -99,21 +99,59 @@ public class ReedSolomonCode implements ErasureCode {
   @Override
   public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
 
-    int[] dataRS = new int[paritySizeRS + stripeSize];
-    int[] erasedValueRS = new int[paritySizeRS];
-    int erasedLocationLengthRS = 0;
-    double singleErasureGroup = 0;
-
+    boolean[] isErased = new boolean[data.length];
+    int erasureGroup = 0;
+    int indexToUse = 0;
+    boolean failed = false;
     if (erasedLocation.length == 0) {
         return;
     }
     assert(erasedLocation.length == erasedValue.length);
 
+    for (int i = 0; i < data.length; i++) {
+      isErased[i] = false;
+    }
     //Make sure erased data and erased values are set to 0
     for (int i = 0; i < erasedLocation.length; i++) {
       data[erasedLocation[i]] = 0;
       erasedValue[i] = 0;
+      isErased[erasedLocation[i]] = true;
     }
+
+    //First see if you can fix the erasures using the simpleParities.
+
+    for (int i = 0; i < erasedLocation.length; i++) {
+      // Finds its XOR Group
+      if (erasedLocation[i]>=paritySizeSRC){
+        erasureGroup = (int) Math.ceil(((float)(erasedLocation[i]-paritySizeSRC+1))/((float)simpleParityDegree));
+      }
+      else {
+        erasureGroup = erasedLocation[i] + 1;
+      }
+      // Now XOR them together.
+      for (int f = -1; f < simpleParityDegree; f++) {
+        if(f==-1)
+          indexToUse = erasureGroup - 1;
+        else
+          indexToUse = (erasureGroup-1)*simpleParityDegree + f + paritySizeSRC;
+        if((indexToUse!=erasedLocation[i])&&isErased[indexToUse]) {
+          failed = true;
+          break;
+        }
+        erasedValue[i] = GF.add(erasedValue[i], data[indexToUse]);
+      }
+      if(failed)
+        break;
+      isErased[erasedLocation[i]] = false; //this index has been recovered.
+    }
+
+    // if the above didn't fail, then all erasures were fixed.
+    if(!failed)
+      return;
+
+    int[] dataRS = new int[paritySizeRS + stripeSize];
+    int[] erasedValueRS = new int[paritySizeRS];
+    int erasedLocationLengthRS = 0;
     //Create a copy of the RS data
     for (int i = paritySizeSRC;
              i < stripeSize + paritySizeRS + paritySizeSRC; i++) {
@@ -123,7 +161,7 @@ public class ReedSolomonCode implements ErasureCode {
      * If more than 1 failure, do RS decode and reconstruct
      * simpleXOR parities if needed
      */
-    if (erasedLocation.length > 1){
+
       //find the number of RS failures
       for (int i = 0; i < erasedLocation.length; i++) {
         //if it is an RS block erasure
@@ -162,23 +200,9 @@ public class ReedSolomonCode implements ErasureCode {
             }
         }
       }
-    }
 
-    // if there is only a single lost node
-    else if (erasedLocation.length == 1){
-      //find its XOR group
-      if (erasedLocation[0]>=paritySizeSRC){
-        singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
-      }
-      else{
-        singleErasureGroup = erasedLocation[0]+1;
-      }
-      //and repair it
-      for (int f = 0; f < simpleParityDegree; f++) {
-        erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
-      }
-      erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
-    }
+
+
   }
 
   @Override
