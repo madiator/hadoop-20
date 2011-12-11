@@ -30,9 +30,9 @@ public class TestErasureCodes extends TestCase {
 
   public void testEncodeDecode() {
     int stripeSize = 10;
-    int paritySizeSRC = 2;
+    int paritySizeSRC = 0;
     int paritySizeRS = 4;
-    int simpleParityDegree = 7;
+    int simpleParityDegree = 20;
     for (int n = 0; n < TEST_CODES; n++) {      
       //paritySizeRS = 0;
       /*while(paritySizeRS<=0) {
@@ -117,7 +117,7 @@ public class TestErasureCodes extends TestCase {
     // Copy erased array.
     int[] data = new int[paritySize + stripeSize];
     // 6th location is the 0th symbol in the message
-    int[] erasedLocations = new int[]{6};//{4, 1, 5, 7};
+    int[] erasedLocations = new int[]{6, 1, 5, 7};
     int[] erasedValues = new int[erasedLocations.length];
     byte[] copy = new byte[bufsize];
     for (int j = 0; j < bufsize; j++) {
@@ -136,7 +136,7 @@ public class TestErasureCodes extends TestCase {
         data[j + paritySize] = 0x000000FF & message[j][i];
       }
       // Use 0, 2, 3, 6, 8, 9, 10, 11, 12, 13th symbol to reconstruct the data
-      erasedValues[0] = 0;
+      //erasedValues[0] = 0;
       ec.decode(data, erasedLocations, erasedValues);
       message[0][i] = (byte)erasedValues[0];
       int alpha = message[0][i];

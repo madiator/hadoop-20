@@ -31,7 +31,7 @@ public class ReedSolomonCode implements ErasureCode {
 	private final int 	PRIMITIVE_ROOT = 2;
 	private final int[] primitivePower;
 	private final GaloisField GF = GaloisField.getInstance(256, 285);
-	private int[]		errSignature; 
+	private final int[]		errSignature;
 	private final int[] paritySymbolLocations;
 	private final int[] dataBuff;
 
@@ -40,12 +40,16 @@ public class ReedSolomonCode implements ErasureCode {
 		this.stripeSize = stripeSize;//k
 		this.paritySize = paritySize;//n-k = n'/f+n'-k
 		this.simpleParityDegree	= simpleParityDegree;
-		this.paritySizeSRC = (stripeSize + paritySize)/(simpleParityDegree + 1);
-		this.paritySizeRS = paritySize - paritySizeSRC;		
+		if(simpleParityDegree > stripeSize + paritySize)
+		  paritySizeSRC = 0;
+		else
+		  paritySizeSRC = (stripeSize + paritySize)/(simpleParityDegree + 1);
+
+		paritySizeRS = paritySize - paritySizeSRC;
 		this.errSignature = new int[paritySizeRS];
 		this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
 		this.dataBuff = new int[paritySizeRS + stripeSize];
-		
+
 		for (int i = 0; i < paritySizeRS+paritySizeSRC; i++) {
 			paritySymbolLocations[i] = i;
 		}
@@ -85,6 +89,7 @@ public class ReedSolomonCode implements ErasureCode {
 			dataBuff[i + paritySizeRS] = message[i];
 		}
 		for (int i = 0; i < paritySizeSRC; i++) {
+		  parity[i] = 0;
 			for (int f = 0; f < simpleParityDegree; f++) {
 				parity[i] = GF.add(dataBuff[i*simpleParityDegree+f], parity[i]);
 			}
@@ -94,84 +99,87 @@ public class ReedSolomonCode implements ErasureCode {
   @Override
   public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
 
-    int[] dataRS = new int[paritySizeRS+stripeSize];
+    int[] dataRS = new int[paritySizeRS + stripeSize];
     int[] erasedValueRS = new int[paritySizeRS];
-    int erasedLocationLengthRS = 0;        
+    int erasedLocationLengthRS = 0;
     double singleErasureGroup = 0;
 
     if (erasedLocation.length == 0) {
         return;
     }
     assert(erasedLocation.length == erasedValue.length);
-    //for(int i = 0; i < erasedValue.length; i++)
-    //  erasedValue[i] = 0;
-    
-    //make sure erased data are set to 0
+
+    //Make sure erased data and erased values are set to 0
     for (int i = 0; i < erasedLocation.length; i++) {
-        data[erasedLocation[i]] = 0;
+      data[erasedLocation[i]] = 0;
+      erasedValue[i] = 0;
     }
-    // create a copy of the RS data
-    for (int i = paritySizeSRC; i < stripeSize+paritySizeRS+paritySizeSRC; i++) {
-        dataRS[i-paritySizeSRC] = data[i];            
+    //Create a copy of the RS data
+    for (int i = paritySizeSRC;
+             i < stripeSize + paritySizeRS + paritySizeSRC; i++) {
+      dataRS[i-paritySizeSRC] = data[i];
     }
-    //if more than 1 failure, do RS decode and reconstruct simpleXOR parities if needed
+    /*
+     * If more than 1 failure, do RS decode and reconstruct
+     * simpleXOR parities if needed
+     */
     if (erasedLocation.length > 1){
-        //find the number of RS failures
+      //find the number of RS failures
+      for (int i = 0; i < erasedLocation.length; i++) {
+        //if it is an RS block erasure
+        if (erasedLocation[i]>=paritySizeSRC)
+          erasedLocationLengthRS++;
+      }
+      if (erasedLocationLengthRS >= 1) { //if there are RS failures
+        int count = 0;
         for (int i = 0; i < erasedLocation.length; i++) {
-          if (erasedLocation[i]>=paritySizeSRC) { //if it is an RS block erasure
-            erasedLocationLengthRS++;
+          // if it is an RS block erasure
+          if (erasedLocation[i] >= paritySizeSRC) {
+            errSignature[count] =
+              primitivePower[erasedLocation[i]-paritySizeSRC];
+            erasedValueRS[count] =
+              GF.substitute(dataRS, primitivePower[count]);
+            count++;
           }
         }
-          
-        if (erasedLocationLengthRS >= 1) { //if there are RS failures
-          int count = 0;            
-            for (int i = 0; i < erasedLocation.length; i++) {
-              if (erasedLocation[i]>=paritySizeSRC){// if it is an RS block erasure 
-                errSignature[count] = primitivePower[erasedLocation[i]-paritySizeSRC];
-                erasedValueRS[count] = GF.substitute(dataRS, primitivePower[count]);
-                count++;                
-              }
-            }
-            GF.solveVandermondeSystem(errSignature, erasedValueRS, erasedLocationLengthRS);
-            count = 0;
-            for (int j = 0; j < erasedLocation.length; j++) {
-              if(erasedLocation[j] >= paritySizeSRC) {
-                dataRS[erasedLocation[j]-paritySizeSRC] = erasedValueRS[count];
-                erasedValue[j] = erasedValueRS[count]; 
-                count++;
-              }              
-            }            
+        GF.solveVandermondeSystem(
+                errSignature, erasedValueRS, erasedLocationLengthRS);
+        count = 0;
+        for (int j = 0; j < erasedLocation.length; j++) {
+          if(erasedLocation[j] >= paritySizeSRC) {
+            dataRS[erasedLocation[j]-paritySizeSRC] = erasedValueRS[count];
+            erasedValue[j] = erasedValueRS[count];
+            count++;
+          }
         }
-
-        // then check if there are any simpleXOR parities erased
-        for (int i = 0; i < erasedLocation.length; i++) {
-            if (erasedLocation[i]<paritySizeSRC){
-              //erasedValue[i] = 0;
-                for (int f = 0; f < simpleParityDegree; f++) {
-                    erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
-                }
+      }
+      // then check if there are any simpleXOR parities erased
+      for (int i = 0; i < erasedLocation.length; i++) {
+        if (erasedLocation[i]<paritySizeSRC){
+          //erasedValue[i] = 0;
+            for (int f = 0; f < simpleParityDegree; f++) {
+                erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
             }
         }
+      }
     }
 
     // if there is only a single lost node
     else if (erasedLocation.length == 1){
-        // find its XOR group 
-        if (erasedLocation[0]>=paritySizeSRC){
-            singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
-        }
-        else{
-            singleErasureGroup = erasedLocation[0]+1;
-        }
-        //System.out.println(Arrays.toString(dataRS));
-        //and repair it
-        //erasedValue[0] = 0;
-        for (int f = 0; f < simpleParityDegree; f++) {          
-            erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
-        }
-        erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
+      //find its XOR group
+      if (erasedLocation[0]>=paritySizeSRC){
+        singleErasureGroup = Math.ceil(((float)(erasedLocation[0]-paritySizeSRC+1))/((float)simpleParityDegree));
+      }
+      else{
+        singleErasureGroup = erasedLocation[0]+1;
+      }
+      //and repair it
+      for (int f = 0; f < simpleParityDegree; f++) {
+        erasedValue[0]  = GF.add(erasedValue[0], dataRS[((int)singleErasureGroup-1)*simpleParityDegree+f]);
+      }
+      erasedValue[0] = GF.add(erasedValue[0],data[(int)singleErasureGroup-1]);
     }
-}
+  }
 
   @Override
   public int stripeSize() {
