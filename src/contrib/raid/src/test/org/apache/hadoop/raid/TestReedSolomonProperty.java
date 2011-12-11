@@ -9,9 +9,9 @@ public class TestReedSolomonProperty extends TestCase {
   private final GaloisField GF = GaloisField.getInstance(256, 285);
   
   public void testRSProperty() {
-    int stripeSize = 50;    
+    int stripeSize = 10;    
     int paritySizeRS = 4;
-    int simpleParityDegree = 6;
+    int simpleParityDegree = 7;
     int paritySizeSRC = 0;
     if (simpleParityDegree == 0)
       paritySizeSRC = 0;
@@ -23,10 +23,13 @@ public class TestReedSolomonProperty extends TestCase {
     //for (int m = 0; m < TEST_TIMES; m++) {
       int symbolMax = (int) Math.pow(2, ec.symbolSize());
       int[] message = new int[stripeSize];
-      for (int i = 0; i < stripeSize; i++) {
+      /*for (int i = 0; i < stripeSize; i++) {
         message[i] = RAND.nextInt(symbolMax);
-      }
+      }*/
+      int[] copy1 = new int[]{139, 139, 61, 193, 186, 69, 213, 127, 34, 47, 125, 63, 219, 247, 67, 137};
+      message = new int[]{213, 127, 34, 47, 125, 63, 219, 247, 67, 137};
       int[] parity = new int[paritySize];
+      int[] tmpIn = new int[stripeSize];
       ec.encode(message, parity);
       int[] data = new int[stripeSize + paritySize];
       int[] copy = new int[data.length];
@@ -50,9 +53,9 @@ public class TestReedSolomonProperty extends TestCase {
           p = GF.add(data[paritySizeSRC+i*simpleParityDegree+f], p);
         }
         full = GF.add(full, p);
-        System.out.print(full+",");
+        System.out.print(p+",");
       }
-      System.out.println(full);
+      
   }
 
 }
