@@ -18,39 +18,36 @@
 
 package org.apache.hadoop.raid;
 
-import java.io.OutputStream;
 import java.io.IOException;
-import java.util.Arrays;
+import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockMissingException;
 import org.apache.hadoop.fs.ChecksumException;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.Progressable;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
 
 public class ReedSolomonDecoder extends Decoder {
   public static final Log LOG = LogFactory.getLog(
                                   "org.apache.hadoop.raid.ReedSolomonDecoder");
-  private ErasureCode[] reedSolomonCode;
+  private final ErasureCode[] reedSolomonCode;
   private long decodeTime;
   private long waitTime;
   ExecutorService parallelDecoder;
   Semaphore decodeOps;
 
   public ReedSolomonDecoder(
-    Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {	
-    super(conf, stripeSize, paritySize,simpleParityDegree);    
+    Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
+    super(conf, stripeSize, paritySize,simpleParityDegree);
     this.reedSolomonCode = new ReedSolomonCode[parallelism];
     for (int i = 0; i < parallelism; i++) {
       reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
@@ -67,7 +64,7 @@ public class ReedSolomonDecoder extends Decoder {
        long blockSize, long errorOffset, long limit,
        OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException {
     FSDataInputStream[] inputs = new FSDataInputStream[stripeSize + paritySize];
-    int[] erasedLocations = buildInputs(fs, srcFile, parityFs, parityFile, 
+    int[] erasedLocations = buildInputs(fs, srcFile, parityFs, parityFile,
                                         errorOffset, inputs, doLightDecode);
     int blockIdxInStripe = ((int)(errorOffset/blockSize)) % stripeSize;
     int erasedLocationToFix = paritySize + blockIdxInStripe;
@@ -92,9 +89,9 @@ public class ReedSolomonDecoder extends Decoder {
     }
   }
 
-  protected int[] buildInputs(FileSystem fs, Path srcFile, 
+  protected int[] buildInputs(FileSystem fs, Path srcFile,
                               FileSystem parityFs, Path parityFile,
-                              long errorOffset, FSDataInputStream[] inputs, 
+                              long errorOffset, FSDataInputStream[] inputs,
                               boolean doLightDecode)
       throws IOException {
     LOG.info("Building inputs to recover block starting at " + errorOffset);
@@ -107,12 +104,12 @@ public class ReedSolomonDecoder extends Decoder {
                ", blockIdx = " + blockIdx + ", stripeIdx = " + stripeIdx);
       ArrayList<Integer> erasedLocations = new ArrayList<Integer>();
       //ArrayList<Integer> erasedLocationsLight = new ArrayList<Integer>();
-      int[] locationsToFetch = new int[paritySize+stripeSize];      
+      int[] locationsToFetch = new int[paritySize+stripeSize];
       for(int i=0;i<paritySize+stripeSize;i++) {
-    	  locationsToFetch[i] = 0;    	  
+    	  locationsToFetch[i] = 0;
       }
-      
-  	  for (int i = paritySize; i < paritySize + stripeSize; i++) {    		  
+
+  	  for (int i = paritySize; i < paritySize + stripeSize; i++) {
   		  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
   		  if (offset == errorOffset) {
 	          LOG.info(srcFile + ":" + offset +
@@ -126,9 +123,9 @@ public class ReedSolomonDecoder extends Decoder {
   	  for(int i = 0; i < erasedLocations.size(); i++) {
   		  erasedLocationsArray[i] = erasedLocations.get(i);
   	  }
-  	  blocksToFetch(erasedLocationsArray,locationsToFetch, doLightDecode);    	     	
+  	  blocksToFetch(erasedLocationsArray, locationsToFetch, doLightDecode);
   	  for(int i = 0; i < locationsToFetch.length; i++) {
-  		  FSDataInputStream in;  		 
+  		  FSDataInputStream in;
   		  if(i<paritySize) {
   			  long offset = blockSize * (stripeIdx * paritySize + i);
   			  if(locationsToFetch[i]>0) {
@@ -141,27 +138,28 @@ public class ReedSolomonDecoder extends Decoder {
   			  else {
   				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
   			              offset + blockSize));
-  				  
+
   				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
   			  }
-  		  }else {
+  		  }
+  		  else {
   			  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
   			  if(locationsToFetch[i]>0) {
     			  in = fs.open(
     			            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
     			  LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
     			  in.seek(offset);
-        		  inputs[i] = in;
+        		inputs[i] = in;
   			  }
   			  else {
   				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
   			              offset + blockSize));
-  				  
+
   				  LOG.info("Adding zeros as input "+i+" for offset "+offset);
   			  }
   		  }
-  	  }    
-      
+  	  }
+
       if (erasedLocations.size() > paritySize) {
         String msg = "Too many erased locations: " + erasedLocations.size();
         LOG.error(msg);
@@ -179,11 +177,11 @@ public class ReedSolomonDecoder extends Decoder {
 
   }
 
-  private String convertToString(int[] array) {
-	  String str =""+array[0];	  
-	  for(int i=1;i<array.length;i++) 
+  private String convertArrayToString(int[] array) {
+	  String str =""+array[0];
+	  for(int i=1;i<array.length;i++)
 		  str = str+", "+array[i];
-	  
+
 	  return str;
   }
   /**
@@ -202,7 +200,7 @@ public class ReedSolomonDecoder extends Decoder {
           long limit,
           OutputStream out,
           Progressable reporter,
-          ParallelStreamReader parallelReader, 
+          ParallelStreamReader parallelReader,
           boolean doLightDecode) throws IOException {
 
     LOG.info("Need to write " + limit +
@@ -217,7 +215,7 @@ public class ReedSolomonDecoder extends Decoder {
         decoded = new int[erasedLocations.length];
       }
 
-      int toWrite = (int)Math.min((long)bufSize, limit - written);
+      int toWrite = (int)Math.min(bufSize, limit - written);
 
       int partSize = (int) Math.ceil(bufSize * 1.0 / parallelism);
       try {
@@ -253,7 +251,7 @@ public class ReedSolomonDecoder extends Decoder {
           int[] erasedLocations,
           long limit,
           Progressable reporter,
-          ParallelStreamReader parallelReader, 
+          ParallelStreamReader parallelReader,
           boolean doLightDecode) throws IOException {
     ParallelStreamReader.ReadResult readResult;
     try {
@@ -295,11 +293,11 @@ public class ReedSolomonDecoder extends Decoder {
       erasedLocations = newErasedLocations;
     }
     readBufs = readResult.readBufs;
-    
-    // If there are more than one erasedLocations, let the heavy decoder take care of it. 
+
+    // If there are more than one erasedLocations, let the heavy decoder take care of it.
     if(doLightDecode&&(erasedLocations.length>1))
-    	throw new IOException("LIGHT DECODER FAILED");    
-       
+    	throw new IOException("LIGHT DECODER FAILED");
+
     return erasedLocations;
   }
 
@@ -348,9 +346,9 @@ public class ReedSolomonDecoder extends Decoder {
       }
     }
   }
-  
-  public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch, 
-      boolean doLightDecode) {  
+
+  public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch,
+      boolean doLightDecode) {
     int paritySizeRS =  simpleParityDegree
                         * (paritySize + stripeSize) / (simpleParityDegree + 1)
                         - stripeSize;
@@ -358,14 +356,14 @@ public class ReedSolomonDecoder extends Decoder {
     int flagErased = 0;
     int locationsLength = 0;
     double singleErasureGroup;
-    
+
     if(!doLightDecode) {
       for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
         locationsToFetch[i] = 1;
       }
       return;
     }
-    
+
     if (erasedLocation.length == 0) {
       return;
     }
@@ -376,7 +374,7 @@ public class ReedSolomonDecoder extends Decoder {
     // First check if the is a single failure
     if (erasedLocation.length == 1) {
       // Find the simpleXOR group that the erased block is a member of
-      if (erasedLocation[0] >= paritySizeSRC) {        
+      if (erasedLocation[0] >= paritySizeSRC) {
         singleErasureGroup = Math.ceil(
                             ((float)(erasedLocation[0] - paritySizeSRC + 1)) /
                             ((float)simpleParityDegree));
@@ -385,10 +383,10 @@ public class ReedSolomonDecoder extends Decoder {
         singleErasureGroup = erasedLocation[0] + 1;
       }
       // Indicate the blocks that need to be communicated
-      for (int f = 0; f < simpleParityDegree; f++) { 
+      for (int f = 0; f < simpleParityDegree; f++) {
         // parityRS and stripe blocks
-        locationsToFetch[paritySizeSRC + 
-                         ((int)singleErasureGroup - 1) 
+        locationsToFetch[paritySizeSRC +
+                         ((int)singleErasureGroup - 1)
                          * simpleParityDegree + f] = 1;
       }
       locationsToFetch[(int)singleErasureGroup - 1] = 1; 		//SimpleXOR block
