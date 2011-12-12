@@ -73,5 +73,11 @@
 		<value>3</value>
 		<description>The degree of the SRC</description>
 	</property>
-  
+      <property>
+    <name>raid.blockfix.classname</name>
+    <value>org.apache.hadoop.raid.LocalBlockIntegrityMonitor</value>
+    <description>Specify the BlockFixer implementation to use.
+      The default is org.apache.hadoop.raid.DistBlockFixer.
+    </description>
+  </property>
 </configuration>
