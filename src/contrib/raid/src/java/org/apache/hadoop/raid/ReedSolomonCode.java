@@ -25,76 +25,76 @@ public class ReedSolomonCode implements ErasureCode {
 	private final int stripeSize;
 	private final int paritySize;
 	private final int paritySizeRS;
-	private final int	paritySizeSRC;
-	private final int	simpleParityDegree;
+	private final int paritySizeSRC;
+	private final int simpleParityDegree;
 	private final int[] generatingPolynomial;
 	private final int PRIMITIVE_ROOT = 2;
 	private final int[] primitivePower;
 	private final GaloisField GF = GaloisField.getInstance(256, 285);
-	private final int[]	errSignature;
+	private final int[] errSignature;
 	private final int[] paritySymbolLocations;
 	private final int[] dataBuff;
 
   public ReedSolomonCode(int stripeSize, int paritySize, int simpleParityDegree) {
-	  assert(stripeSize + paritySize < GF.getFieldSize());
-		this.stripeSize = stripeSize;//k
-		this.paritySize = paritySize;//n-k = n'/f+n'-k
-		this.simpleParityDegree	= simpleParityDegree;
-		if(simpleParityDegree > stripeSize + paritySize)
-		  paritySizeSRC = 0;
+    assert(stripeSize + paritySize < GF.getFieldSize());
+    this.stripeSize = stripeSize;//k
+    this.paritySize = paritySize;//n-k = n'/f+n'-k
+    this.simpleParityDegree	= simpleParityDegree;
+    if(simpleParityDegree > stripeSize + paritySize)
+      paritySizeSRC = 0;
 		else
 		  paritySizeSRC = (stripeSize + paritySize)/(simpleParityDegree + 1);
 
-		paritySizeRS = paritySize - paritySizeSRC;
-		this.errSignature = new int[paritySizeRS];
-		this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
-		this.dataBuff = new int[paritySizeRS + stripeSize];
+    paritySizeRS = paritySize - paritySizeSRC;
+    this.errSignature = new int[paritySizeRS];
+    this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
+    this.dataBuff = new int[paritySizeRS + stripeSize];
 
-		for (int i = 0; i < paritySizeRS+paritySizeSRC; i++) {
-			paritySymbolLocations[i] = i;
-		}
+    for (int i = 0; i < paritySizeRS+paritySizeSRC; i++) {
+      paritySymbolLocations[i] = i;
+    }
 
-		this.primitivePower = new int[stripeSize + paritySizeRS];
-		// compute powers of the primitive root
-		for (int i = 0; i < stripeSize + paritySizeRS; i++) {
-			primitivePower[i] = GF.power(PRIMITIVE_ROOT, i);
-		}
-		// compute generating polynomial
-		int[] gen  = {1};
-		int[] poly = new int[2];
-		for (int i = 0; i < paritySizeRS; i++) {
-			poly[0] = primitivePower[i];
-			poly[1] = 1;
-			gen 	= GF.multiply(gen, poly);
-		}
-		// generating polynomial has all generating roots
-		generatingPolynomial = gen;
+    this.primitivePower = new int[stripeSize + paritySizeRS];
+    // compute powers of the primitive root
+    for (int i = 0; i < stripeSize + paritySizeRS; i++) {
+      primitivePower[i] = GF.power(PRIMITIVE_ROOT, i);
+    }
+    // compute generating polynomial
+    int[] gen  = {1};
+    int[] poly = new int[2];
+    for (int i = 0; i < paritySizeRS; i++) {
+      poly[0] = primitivePower[i];
+      poly[1] = 1;
+      gen 	= GF.multiply(gen, poly);
+    }
+    // generating polynomial has all generating roots
+    generatingPolynomial = gen;
   }
 
   @Override
-	public void encode(int[] message, int[] parity) {
-		assert(message.length == stripeSize && parity.length == paritySizeRS+paritySizeSRC);
+  public void encode(int[] message, int[] parity) {
+    assert(message.length == stripeSize && parity.length == paritySizeRS+paritySizeSRC);
 
-		for (int i = 0; i < paritySizeRS; i++) {
-			dataBuff[i] = 0;
-		}
-		for (int i = 0; i < stripeSize; i++) {
-			dataBuff[i + paritySizeRS] = message[i];
-		}
-		GF.remainder(dataBuff, generatingPolynomial);
-		for (int i = 0; i < paritySizeRS; i++) {
-			parity[paritySizeSRC+i] = dataBuff[i];
-		}
-		for (int i = 0; i < stripeSize; i++) {
-			dataBuff[i + paritySizeRS] = message[i];
-		}
-		for (int i = 0; i < paritySizeSRC; i++) {
-		  parity[i] = 0;
-			for (int f = 0; f < simpleParityDegree; f++) {
-				parity[i] = GF.add(dataBuff[i*simpleParityDegree+f], parity[i]);
-			}
-		}
-	}
+    for (int i = 0; i < paritySizeRS; i++) {
+      dataBuff[i] = 0;
+    }
+    for (int i = 0; i < stripeSize; i++) {
+      dataBuff[i + paritySizeRS] = message[i];
+    }
+    GF.remainder(dataBuff, generatingPolynomial);
+    for (int i = 0; i < paritySizeRS; i++) {
+      parity[paritySizeSRC+i] = dataBuff[i];
+    }
+    for (int i = 0; i < stripeSize; i++) {
+      dataBuff[i + paritySizeRS] = message[i];
+    }
+    for (int i = 0; i < paritySizeSRC; i++) {
+      parity[i] = 0;
+      for (int f = 0; f < simpleParityDegree; f++) {
+        parity[i] = GF.add(dataBuff[i*simpleParityDegree+f], parity[i]);
+      }
+    }
+  }
 
   @Override
   public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
