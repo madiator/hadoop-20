@@ -24,8 +24,8 @@ import java.util.Set;
 import junit.framework.TestCase;
 
 public class TestErasureCodes extends TestCase {
-  final int TEST_CODES = 100;
-  final int TEST_TIMES = 1000;
+  final int TEST_CODES = 1;
+  final int TEST_TIMES = 1;
   final Random RAND = new Random();
 
   public void testEncodeDecode() {
@@ -117,7 +117,7 @@ public class TestErasureCodes extends TestCase {
     int[] data = new int[paritySize + stripeSize];
     // The 0th symbol in the message is at paritySize
     // make sure the below indices work.
-    int[] erasedLocations = new int[]{paritySize};//, 10};//, 5, 7};
+    int[] erasedLocations = new int[]{paritySize, 0};//, 10};//, 5, 7};
     int[] erasedValues = new int[erasedLocations.length];
     byte[] copy = new byte[bufsize];
     for (int j = 0; j < bufsize; j++) {
@@ -125,6 +125,7 @@ public class TestErasureCodes extends TestCase {
       message[0][j] = 0;
     }
 
+    for(int tests = 0; tests < 10; tests++) {
     long decodeStart = System.currentTimeMillis();
     for (int i = 0; i < bufsize; i++) {
       // Copy parity first.
@@ -143,6 +144,7 @@ public class TestErasureCodes extends TestCase {
     System.out.println("Time to decode = " + decodeMSecs +
       "msec (" + message[0].length / (1000 * decodeMSecs) + " MB/s)");
     assertTrue("Decode failed", java.util.Arrays.equals(copy, message[0]));
+    }
   }
 
   public void testXorPerformance() {
