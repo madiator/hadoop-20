@@ -45,19 +45,19 @@ import org.apache.hadoop.util.Progressable;
 
 /**
  * this class implements the actual reconstructing functionality
- * we keep this in a separate class so that 
+ * we keep this in a separate class so that
  * the distributed block fixer can use it
- */ 
+ */
 abstract class BlockReconstructor extends Configured {
 
   public static final Log LOG = LogFactory.getLog(BlockReconstructor.class);
 
   private String xorPrefix;
   private String rsPrefix;
-  private XOREncoder xorEncoder;
-  private XORDecoder xorDecoder;
-  private ReedSolomonEncoder rsEncoder;
-  private ReedSolomonDecoder rsDecoder;
+  private final XOREncoder xorEncoder;
+  private final XORDecoder xorDecoder;
+  private final ReedSolomonEncoder rsEncoder;
+  private final ReedSolomonDecoder rsDecoder;
   private static int dataTransferProtocolVersion = -1;
 
   BlockReconstructor(Configuration conf) throws IOException {
@@ -76,13 +76,13 @@ abstract class BlockReconstructor extends Configured {
     xorDecoder = new XORDecoder(getConf(), stripeLength);
     int parityLength = RaidNode.rsParityLength(getConf());
     int simpleParityDegree = RaidNode.rsSimpleParityDegree(getConf());
-    rsEncoder = new ReedSolomonEncoder(getConf(), stripeLength, 
+    rsEncoder = new ReedSolomonEncoder(getConf(), stripeLength,
     		parityLength, simpleParityDegree);
-    rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength, 
+    rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength,
     		parityLength, simpleParityDegree);
 
   }
-  
+
   private static synchronized int getDataTransferProtocolVersion(
       Configuration conf) throws IOException {
     if (dataTransferProtocolVersion == -1) {
@@ -125,10 +125,10 @@ abstract class BlockReconstructor extends Configured {
   /**
    * Fix a file, report progess.
    *
-   * @return true if file was reconstructed, false if no reconstruction 
+   * @return true if file was reconstructed, false if no reconstruction
    * was necessary or possible.
    */
-  boolean reconstructFile(Path srcPath, Progressable progress) 
+  boolean reconstructFile(Path srcPath, Progressable progress)
       throws IOException {
 
     if (RaidNode.isParityHarPartFile(srcPath)) {
@@ -170,7 +170,7 @@ abstract class BlockReconstructor extends Configured {
     // there was nothing to do
     LOG.warn("Could not find parity file for source file "
         + srcPath + ", ignoring...");
-    return false;    
+    return false;
   }
 
   /**
@@ -206,7 +206,7 @@ abstract class BlockReconstructor extends Configured {
    * Reads through a source file reconstructing lost blocks on the way.
    * @param srcPath Path identifying the lost file.
    * @throws IOException
-   * @return true if file was reconstructed, false if no reconstruction 
+   * @return true if file was reconstructed, false if no reconstruction
    * was necessary or possible.
    */
   boolean processFile(Path srcPath, ParityFilePair parityPair,
@@ -223,7 +223,7 @@ abstract class BlockReconstructor extends Configured {
     int numBlocksReconstructed = 0;
     List<LocatedBlock> lostBlocks = lostBlocksInFile(srcFs, uriPath, srcStat);
     if (lostBlocks.size() == 0) {
-      LOG.warn("Couldn't find any lost blocks in file " + srcPath + 
+      LOG.warn("Couldn't find any lost blocks in file " + srcPath +
           ", ignoring...");
       return false;
     }
@@ -238,36 +238,36 @@ abstract class BlockReconstructor extends Configured {
         Math.min(blockSize, srcFileSize - lostBlockOffset);
       File localBlockFile =
         File.createTempFile(lostBlock.getBlockName(), ".tmp");
-      localBlockFile.deleteOnExit();      
-      boolean doLightDecodeOptions[] = {true, false};  
-      
+      localBlockFile.deleteOnExit();
+      boolean doLightDecodeOptions[] = {true, false};
+
       try {
-    	  for(boolean doLightDecode:doLightDecodeOptions) {    	  
+    	  for(boolean doLightDecode:doLightDecodeOptions) {
 	    	  try {
 	    		  LOG.info("lostBlockOffset = "+lostBlockOffset);
 		        decoder.recoverBlockToFile(srcFs, srcPath, parityPair.getFileSystem(),
 		            parityPair.getPath(), blockSize,
 		            lostBlockOffset, localBlockFile,
 		            blockContentsSize, progress, doLightDecode);
-		
+
 		        // Now that we have recovered the file block locally, send it.
 		        String datanode = chooseDatanode(lb.getLocations());
 		        computeMetadataAndSendReconstructedBlock(datanode, localBlockFile,
 		            lostBlock, blockContentsSize);
-		        
 		        numBlocksReconstructed++;
+		        LOG.info("In processFile, block reconstruction successful, numBlocksReconstructed = " +
+                ""+numBlocksReconstructed);
 		        break; //If the block reconstruction was successful, break out of the loop
-		
-		      }catch(IOException e) {    	  
-		    	  // Light Decoder failed. 
+
+		      }catch(IOException e) {
+		    	  // Light Decoder failed.
 		    	  // So try the Heavy Decoder by setting doLightDecode parameter to false
 		    	  // The for loop will set this automatically.
-		    	  
+
 		    	  if(doLightDecode)
 		    		  LOG.error("Light Decoder failed. Trying the heavy decoder");
 		    	  else
 		    		  LOG.error("Unable to decode");
-		    	  
 		      }
 	      }
       }
@@ -276,8 +276,8 @@ abstract class BlockReconstructor extends Configured {
       }
       progress.progress();
     }
-    
-    
+
+
     LOG.info("Reconstructed " + numBlocksReconstructed + " blocks in " + srcPath);
     return true;
   }
@@ -286,16 +286,16 @@ abstract class BlockReconstructor extends Configured {
    * Reads through a parity file, reconstructing lost blocks on the way.
    * This function uses the corresponding source file to regenerate parity
    * file blocks.
-   * @return true if file was reconstructed, false if no reconstruction 
+   * @return true if file was reconstructed, false if no reconstruction
    * was necessary or possible.
    */
-  boolean processParityFile(Path parityPath, Encoder encoder, 
+  boolean processParityFile(Path parityPath, Encoder encoder,
       Progressable progress)
   throws IOException {
     LOG.info("Processing parity file " + parityPath);
     Path srcPath = sourcePathFromParityPath(parityPath);
     if (srcPath == null) {
-      LOG.warn("Could not get regular file corresponding to parity file " +  
+      LOG.warn("Could not get regular file corresponding to parity file " +
           parityPath + ", ignoring...");
       return false;
     }
@@ -308,17 +308,17 @@ abstract class BlockReconstructor extends Configured {
 
     // Check timestamp.
     if (srcStat.getModificationTime() != parityStat.getModificationTime()) {
-      LOG.warn("Mismatching timestamp for " + srcPath + " and " + parityPath + 
+      LOG.warn("Mismatching timestamp for " + srcPath + " and " + parityPath +
           ", ignoring...");
       return false;
     }
 
     String uriPath = parityPath.toUri().getPath();
     int numBlocksReconstructed = 0;
-    List<LocatedBlock> lostBlocks = 
+    List<LocatedBlock> lostBlocks =
       lostBlocksInFile(parityFs, uriPath, parityStat);
     if (lostBlocks.size() == 0) {
-      LOG.warn("Couldn't find any lost blocks in parity file " + parityPath + 
+      LOG.warn("Couldn't find any lost blocks in parity file " + parityPath +
           ", ignoring...");
       return false;
     }
@@ -335,13 +335,13 @@ abstract class BlockReconstructor extends Configured {
 
       try {
         encoder.recoverParityBlockToFile(parityFs, srcPath, srcFileSize,
-            blockSize, parityPath, 
+            blockSize, parityPath,
             lostBlockOffset, localBlockFile, progress);
-        
+
         // Now that we have recovered the parity file block locally, send it.
         String datanode = chooseDatanode(lb.getLocations());
         computeMetadataAndSendReconstructedBlock(
-            datanode, localBlockFile, 
+            datanode, localBlockFile,
             lostBlock, blockSize);
 
         numBlocksReconstructed++;
@@ -350,7 +350,7 @@ abstract class BlockReconstructor extends Configured {
       }
       progress.progress();
     }
-    
+
     LOG.info("Reconstructed " + numBlocksReconstructed + " blocks in " + parityPath);
     return true;
   }
@@ -359,7 +359,7 @@ abstract class BlockReconstructor extends Configured {
    * Reads through a parity HAR part file, reconstructing lost blocks on the way.
    * A HAR block can contain many file blocks, as long as the HAR part file
    * block size is a multiple of the file block size.
-   * @return true if file was reconstructed, false if no reconstruction 
+   * @return true if file was reconstructed, false if no reconstruction
    * was necessary or possible.
    */
   boolean processParityHarPartFile(Path partFile,
@@ -379,10 +379,10 @@ abstract class BlockReconstructor extends Configured {
     HarIndex harIndex = HarIndex.getHarIndex(dfs, partFile);
     String uriPath = partFile.toUri().getPath();
     int numBlocksReconstructed = 0;
-    List<LocatedBlock> lostBlocks = lostBlocksInFile(dfs, uriPath, 
+    List<LocatedBlock> lostBlocks = lostBlocksInFile(dfs, uriPath,
         partFileStat);
     if (lostBlocks.size() == 0) {
-      LOG.warn("Couldn't find any lost blocks in HAR file " + partFile + 
+      LOG.warn("Couldn't find any lost blocks in HAR file " + partFile +
           ", ignoring...");
       return false;
     }
@@ -395,23 +395,23 @@ abstract class BlockReconstructor extends Configured {
       localBlockFile.deleteOnExit();
 
       try {
-        processParityHarPartBlock(dfs, partFile, lostBlock, 
+        processParityHarPartBlock(dfs, partFile, lostBlock,
             lostBlockOffset, partFileStat, harIndex,
             localBlockFile, progress);
-        
+
         // Now that we have recovered the part file block locally, send it.
         String datanode = chooseDatanode(lb.getLocations());
         computeMetadataAndSendReconstructedBlock(datanode, localBlockFile,
-            lostBlock, 
+            lostBlock,
             localBlockFile.length());
-        
+
         numBlocksReconstructed++;
       } finally {
         localBlockFile.delete();
       }
       progress.progress();
     }
-    
+
     LOG.info("Reconstructed " + numBlocksReconstructed + " blocks in " + partFile);
     return true;
   }
@@ -421,7 +421,7 @@ abstract class BlockReconstructor extends Configured {
    * parity block in the part file block.
    */
   private void processParityHarPartBlock(FileSystem dfs, Path partFile,
-      Block block, 
+      Block block,
       long blockOffset,
       FileStatus partFileStat,
       HarIndex harIndex,
@@ -436,7 +436,7 @@ abstract class BlockReconstructor extends Configured {
     try {
       // A HAR part file block could map to several parity files. We need to
       // use all of them to recover this block.
-      final long blockEnd = Math.min(blockOffset + 
+      final long blockEnd = Math.min(blockOffset +
           partFileStat.getBlockSize(),
           partFileStat.getLen());
       for (long offset = blockOffset; offset < blockEnd; ) {
@@ -474,7 +474,7 @@ abstract class BlockReconstructor extends Configured {
             srcStat.getBlockSize(), parityFile,
             lostOffsetInParity, out, progress);
         // Finished recovery of one parity block. Since a parity block has the
-        // same size as a source block, we can move offset by source block 
+        // same size as a source block, we can move offset by source block
         // size.
         offset += srcStat.getBlockSize();
         LOG.info("Recovered " + srcStat.getBlockSize() + " part file bytes ");
@@ -552,7 +552,7 @@ abstract class BlockReconstructor extends Configured {
     int bytesSinceFlush = 0;
     while (true) {
       // Read some bytes.
-      int bytesRead = dataStream.read(buf, bytesSinceFlush, 
+      int bytesRead = dataStream.read(buf, bytesSinceFlush,
           bytesPerChecksum - bytesSinceFlush);
       if (bytesRead == -1) {
         if (bytesSinceFlush > 0) {
@@ -596,7 +596,7 @@ abstract class BlockReconstructor extends Configured {
       blockContents.close();
       // Reopen
       blockContents = new FileInputStream(localBlockFile);
-      sendReconstructedBlock(datanode, blockContents, blockMetadata, block, 
+      sendReconstructedBlock(datanode, blockContents, blockMetadata, block,
           blockSize);
     } finally {
       if (blockContents != null) {
@@ -621,13 +621,13 @@ abstract class BlockReconstructor extends Configured {
   private void sendReconstructedBlock(String datanode,
       final InputStream blockContents,
       DataInputStream metadataIn,
-      Block block, long blockSize) 
+      Block block, long blockSize)
   throws IOException {
     InetSocketAddress target = NetUtils.createSocketAddr(datanode);
     Socket sock = SocketChannel.open().socket();
 
     int readTimeout =
-      getConf().getInt(BlockIntegrityMonitor.BLOCKFIX_READ_TIMEOUT, 
+      getConf().getInt(BlockIntegrityMonitor.BLOCKFIX_READ_TIMEOUT,
           HdfsConstants.READ_TIMEOUT);
     NetUtils.connect(sock, target, readTimeout);
     sock.setSoTimeout(readTimeout);
@@ -637,7 +637,7 @@ abstract class BlockReconstructor extends Configured {
 
     OutputStream baseStream = NetUtils.getOutputStream(sock, writeTimeout);
     DataOutputStream out =
-      new DataOutputStream(new BufferedOutputStream(baseStream, 
+      new DataOutputStream(new BufferedOutputStream(baseStream,
           FSConstants.
           SMALL_BUFFER_SIZE));
 
@@ -650,13 +650,13 @@ abstract class BlockReconstructor extends Configured {
       LOG.info("Sending block " + block +
           " from " + sock.getLocalSocketAddress().toString() +
           " to " + sock.getRemoteSocketAddress().toString());
-      BlockSender blockSender = 
+      BlockSender blockSender =
         new BlockSender(block, blockSize, 0, blockSize,
             corruptChecksumOk, chunkOffsetOK, verifyChecksum,
             transferToAllowed,
             metadataIn, new BlockSender.InputStreamFactory() {
           @Override
-          public InputStream createStream(long offset) 
+          public InputStream createStream(long offset)
           throws IOException {
             // we are passing 0 as the offset above,
             // so we can safely ignore
@@ -712,22 +712,23 @@ abstract class BlockReconstructor extends Configured {
       String uriPath, FileStatus stat)
       throws IOException;
 
-  
+
   /**
    * This class implements corrupt block fixing functionality.
    */
   public static class CorruptBlockReconstructor extends BlockReconstructor {
-    
+
     public CorruptBlockReconstructor(Configuration conf) throws IOException {
       super(conf);
     }
 
-    
+
+    @Override
     List<LocatedBlock> lostBlocksInFile(DistributedFileSystem fs,
-                                        String uriPath, 
+                                        String uriPath,
                                         FileStatus stat)
         throws IOException {
-      
+
       List<LocatedBlock> corrupt = new LinkedList<LocatedBlock>();
       LocatedBlocks locatedBlocks =
         fs.getClient().namenode.getBlockLocations(uriPath, 0, stat.getLen());
@@ -740,7 +741,7 @@ abstract class BlockReconstructor extends Configured {
       return corrupt;
     }
   }
-  
+
   /**
    * This class implements decommissioning block copying functionality.
    */
@@ -750,6 +751,7 @@ abstract class BlockReconstructor extends Configured {
       super(conf);
     }
 
+    @Override
     List<LocatedBlock> lostBlocksInFile(DistributedFileSystem fs,
                                            String uriPath,
                                            FileStatus stat)

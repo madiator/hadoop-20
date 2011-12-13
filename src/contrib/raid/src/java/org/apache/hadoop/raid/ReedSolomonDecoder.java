@@ -124,6 +124,7 @@ public class ReedSolomonDecoder extends Decoder {
   		  erasedLocationsArray[i] = erasedLocations.get(i);
   	  }
   	  blocksToFetch(erasedLocationsArray, locationsToFetch, doLightDecode);
+  	  LOG.info("locationsToFetch "+convertArrayToString(locationsToFetch));
   	  for(int i = 0; i < locationsToFetch.length; i++) {
   		  FSDataInputStream in;
   		  if(i<paritySize) {
@@ -177,7 +178,7 @@ public class ReedSolomonDecoder extends Decoder {
 
   }
 
-  private String convertArrayToString(int[] array) {
+  public static String convertArrayToString(int[] array) {
 	  String str =""+array[0];
 	  for(int i=1;i<array.length;i++)
 		  str = str+", "+array[i];
@@ -214,7 +215,8 @@ public class ReedSolomonDecoder extends Decoder {
       if (decoded.length != erasedLocations.length) {
         decoded = new int[erasedLocations.length];
       }
-
+      LOG.info("in writeFixedBlock, " +
+      		"erasedLocations after readFromInputs = "+convertArrayToString(erasedLocations));
       int toWrite = (int)Math.min(bufSize, limit - written);
 
       int partSize = (int) Math.ceil(bufSize * 1.0 / parallelism);
@@ -291,6 +293,7 @@ public class ReedSolomonDecoder extends Decoder {
       }
       newErasedLocations[newErasedLocations.length - 1] = i;
       erasedLocations = newErasedLocations;
+      LOG.info("in readFromInputs, erasedLocations is now "+convertArrayToString(erasedLocations));
     }
     readBufs = readResult.readBufs;
 
@@ -356,10 +359,15 @@ public class ReedSolomonDecoder extends Decoder {
     int flagErased = 0;
     int locationsLength = 0;
     double singleErasureGroup;
+    LOG.info("blocksToFetch: doLightDecode is "+doLightDecode);
+    LOG.info("erasedLocation "+convertArrayToString(erasedLocation));
 
     if(!doLightDecode) {
       for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
         locationsToFetch[i] = 1;
+      }
+      for (int i = 0; i < erasedLocation.length; i++) {
+        locationsToFetch[erasedLocation[i]] = 0;
       }
       return;
     }
