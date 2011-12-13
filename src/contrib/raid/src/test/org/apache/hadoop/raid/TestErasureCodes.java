@@ -24,8 +24,8 @@ import java.util.Set;
 import junit.framework.TestCase;
 
 public class TestErasureCodes extends TestCase {
-  final int TEST_CODES = 100;
-  final int TEST_TIMES = 1000;
+  final int TEST_CODES = 1;//00;
+  final int TEST_TIMES = 1;//000;
   final Random RAND = new Random();
 
   public void testEncodeDecode() {
@@ -67,7 +67,7 @@ public class TestErasureCodes extends TestCase {
 
   public void testRSPerformance() {
     int stripeSize = 10;
-    int paritySize = 4;
+    int paritySize = 6;
     ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize);
     int symbolMax = (int) Math.pow(2, ec.symbolSize());
     byte[][] message = new byte[stripeSize][];
@@ -100,14 +100,14 @@ public class TestErasureCodes extends TestCase {
     // Copy erased array.
     int[] data = new int[paritySize + stripeSize];
     // 4th location is the 0th symbol in the message
-    int[] erasedLocations = new int[]{4, 1, 5, 7};
+    int[] erasedLocations = new int[]{6, 1, 2, 10};//, 1, 5, 7};
     int[] erasedValues = new int[erasedLocations.length];
     byte[] copy = new byte[bufsize];
     for (int j = 0; j < bufsize; j++) {
       copy[j] = message[0][j];
       message[0][j] = 0;
     }
-
+    for(int test = 0; test< 10;test++) {
     long decodeStart = System.currentTimeMillis();
     for (int i = 0; i < bufsize; i++) {
       // Copy parity first.
@@ -127,6 +127,7 @@ public class TestErasureCodes extends TestCase {
     System.out.println("Time to decode = " + decodeMSecs +
       "msec (" + message[0].length / (1000 * decodeMSecs) + " MB/s)");
     assertTrue("Decode failed", java.util.Arrays.equals(copy, message[0]));
+    }
   }
 
   public void testXorPerformance() {
