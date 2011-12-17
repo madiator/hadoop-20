@@ -105,16 +105,15 @@ public class ParityFilePair {
       return false;
     }
     int stripeLength = RaidNode.getStripeLength(conf);
-    int parityLegnth = ErasureCodeType.XOR == code ? 1 :
-        RaidNode.rsParityLength(conf);
+    int parityLength = RaidNode.parityLength(code, conf);
     double sourceBlocks = Math.ceil(
         ((double)src.getLen()) / src.getBlockSize());
     int parityBlocks = (int)Math.ceil(
-        sourceBlocks / stripeLength) * parityLegnth;
+        sourceBlocks / stripeLength) * parityLength;
     long expectedSize = parityBlocks * src.getBlockSize();
     if (parity.getLen() != expectedSize) {
       RaidNode.LOG.error("Bad parity file:" + parity.getPath() +
-          " File size doen't match. parity:" + parity.getLen() +
+          " File size doesn't match. parity:" + parity.getLen() +
           " expected:" + expectedSize);
       return false;
     }

@@ -18,23 +18,22 @@
 
 package org.apache.hadoop.raid;
 
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Random;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.Progressable;
 
 /**
@@ -51,7 +50,7 @@ public abstract class Encoder {
   protected int parallelism;
   protected int stripeSize;
   protected int paritySize;
-  protected int simpleParityDegree;
+  protected int paritySizeSRC;
   protected Random rand;
   protected int bufSize;
   protected byte[][] readBufs;
@@ -61,8 +60,11 @@ public abstract class Encoder {
    * A class that acts as a sink for data, similar to /dev/null.
    */
   static class NullOutputStream extends OutputStream {
+    @Override
     public void write(byte[] b) throws IOException {}
+    @Override
     public void write(int b) throws IOException {}
+    @Override
     public void write(byte[] b, int off, int len) throws IOException {}
   }
 
@@ -78,17 +80,17 @@ public abstract class Encoder {
     this.writeBufs = new byte[paritySize][];
     allocateBuffers();
   }
-  
-  Encoder(Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
-	  this.simpleParityDegree = simpleParityDegree;
-	  EncoderCommon(conf, stripeSize, paritySize);
+
+  Encoder(Configuration conf, int stripeSize, int paritySizeRS, int paritySizeSRC) {
+	  this.paritySizeSRC = paritySizeSRC;
+	  EncoderCommon(conf, stripeSize, paritySizeRS + paritySizeSRC);
   }
-  
+
   Encoder(Configuration conf, int stripeSize, int paritySize) {
-	  this.simpleParityDegree = 0;
+	  this.paritySizeSRC = 0;
 	  EncoderCommon(conf, stripeSize, paritySize);
   }
-  
+
 
   private void allocateBuffers() {
     for (int i = 0; i < paritySize; i++) {
@@ -97,7 +99,7 @@ public abstract class Encoder {
   }
 
   private void configureBuffers(long blockSize) {
-    if ((long)bufSize > blockSize) {
+    if (bufSize > blockSize) {
       bufSize = (int)blockSize;
       allocateBuffers();
     } else if (blockSize % bufSize != 0) {

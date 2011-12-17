@@ -18,32 +18,32 @@
 
 package org.apache.hadoop.raid;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.IOException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.Progressable;
 
 public class ReedSolomonEncoder extends Encoder {
   public static final Log LOG = LogFactory.getLog(
                                   "org.apache.hadoop.raid.ReedSolomonEncoder");
-  private ErasureCode reedSolomonCode;
+  private final ErasureCode reedSolomonCode;
 
   public ReedSolomonEncoder(
-    Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
-    super(conf, stripeSize, paritySize, simpleParityDegree);    
-    this.reedSolomonCode = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
+    Configuration conf, int stripeSize, int paritySizeRS, int paritySizeSRC) {
+    super(conf, stripeSize, paritySizeRS, paritySizeSRC);
+    this.paritySize = paritySizeRS + paritySizeSRC; // just in case
+    this.reedSolomonCode =
+      new ReedSolomonCode(stripeSize, paritySizeRS, paritySizeSRC);
     LOG.info("Initialized ReedSolomonEncoder" +
-    		" with simpleParityDegree = "+simpleParityDegree);   
+    		" with paritySizeSRC = "+paritySizeSRC);
   }
 
+  @Override
   protected void encodeStripeImpl(
     InputStream[] blocks,
     long stripeStartOffset,

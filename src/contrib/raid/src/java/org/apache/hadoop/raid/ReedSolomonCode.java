@@ -35,17 +35,21 @@ public class ReedSolomonCode implements ErasureCode {
   private final int[] paritySymbolLocations;
   private final int[] dataBuff;
 
-  public ReedSolomonCode(int stripeSize, int paritySize, int simpleParityDegree) {
+  public ReedSolomonCode(int stripeSize, int paritySizeRS, int paritySizeSRC) {
+    this.paritySizeRS = paritySizeRS;
+    this.paritySizeSRC = paritySizeSRC;
+    this.paritySize = paritySizeRS + paritySizeSRC;
+    this.stripeSize = stripeSize;
     assert(stripeSize + paritySize < GF.getFieldSize());
-    this.stripeSize = stripeSize;//k
-    this.paritySize = paritySize;//n-k = n'/f+n'-k
-    this.simpleParityDegree	= simpleParityDegree;
-    if(simpleParityDegree > stripeSize + paritySize)
-      paritySizeSRC = 0;
-		else
-		  paritySizeSRC = (stripeSize + paritySize)/(simpleParityDegree + 1);
 
-    paritySizeRS = paritySize - paritySizeSRC;
+    if(paritySizeSRC>0)
+      simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRC;
+    else
+      simpleParityDegree = -1;
+
+    //TODO: fix above else condition and make sure the code runs RS if paritySizeSRC = 0;
+
+
     this.errSignature = new int[paritySizeRS];
     this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
     this.dataBuff = new int[paritySizeRS + stripeSize];
@@ -73,7 +77,7 @@ public class ReedSolomonCode implements ErasureCode {
 
   @Override
   public void encode(int[] message, int[] parity) {
-    assert(message.length == stripeSize && parity.length == paritySizeRS+paritySizeSRC);
+    assert(message.length == stripeSize && parity.length == paritySize);
 
     for (int i = 0; i < paritySizeRS; i++) {
       dataBuff[i] = 0;

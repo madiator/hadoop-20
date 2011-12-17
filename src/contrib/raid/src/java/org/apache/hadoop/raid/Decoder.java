@@ -27,12 +27,7 @@ import java.util.Random;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.BlockMissingException;
-import org.apache.hadoop.fs.ChecksumException;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.Progressable;
 
@@ -50,11 +45,11 @@ public abstract class Decoder {
   protected int parallelism;
   protected int stripeSize;
   protected int paritySize;
-  protected int simpleParityDegree;
+  protected int paritySizeSRC;
   protected Random rand;
   protected int bufSize;
   protected byte[][] readBufs;
-  protected byte[][] writeBufs;  
+  protected byte[][] writeBufs;
 
   private void DecoderCommon(Configuration conf, int stripeSize, int paritySize) {
     this.conf = conf;
@@ -67,14 +62,14 @@ public abstract class Decoder {
     this.writeBufs = new byte[paritySize][];
     allocateBuffers();
   }
-  
-  Decoder(Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
-	  this.simpleParityDegree = simpleParityDegree;
-	  DecoderCommon(conf, stripeSize, paritySize);
+
+  Decoder(Configuration conf, int stripeSize, int paritySizeRS, int paritySizeSRC) {
+	  this.paritySizeSRC = paritySizeSRC;
+	  DecoderCommon(conf, stripeSize, paritySizeRS + paritySizeSRC);
   }
-  
-  Decoder(Configuration conf, int stripeSize, int paritySize) {	  
-	  this.simpleParityDegree = 0;
+
+  Decoder(Configuration conf, int stripeSize, int paritySize) {
+	  this.paritySizeSRC = 0;
 	  DecoderCommon(conf, stripeSize, paritySize);
   }
 
@@ -85,7 +80,7 @@ public abstract class Decoder {
   }
 
   private void configureBuffers(long blockSize) {
-    if ((long)bufSize > blockSize) {
+    if (bufSize > blockSize) {
       bufSize = (int)blockSize;
       allocateBuffers();
     } else if (blockSize % bufSize != 0) {
@@ -149,7 +144,7 @@ public abstract class Decoder {
 	    fixErasedBlockImpl(fs, srcFile, parityFs, parityFile,
 	      blockSize, errorOffset, limit, out, reporter, false);
 	  }
-  
+
   /**
    * Implementation-specific mechanism of writing a fixed block.
    * @param fs The filesystem containing the source file.

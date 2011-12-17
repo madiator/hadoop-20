@@ -76,12 +76,12 @@ public abstract class RaidNode implements RaidProtocol {
   // Default stripe length = 5, parity length for RS code = 3
   public static final int DEFAULT_STRIPE_LENGTH = 5;
   public static final int RS_PARITY_LENGTH_DEFAULT = 3;
-  public static final int RS_SIMPLEPARITY_DEGREE_DEFAULT = 3;
-    
+  public static final int SRC_PARITY_LENGTH_DEFAULT = 0;
+
   public static final String RS_PARITY_LENGTH_KEY = "hdfs.raidrs.paritylength";
   public static final String STRIPE_LENGTH_KEY = "hdfs.raid.stripeLength";
-  public static final String RS_SIMPLEPARITY_DEGREE_KEY = "hdfs.raidrs.simpleparitydegree";
-  
+  public static final String SRC_PARITY_LENGTH_KEY = "hdfs.raidrs.srcparitylength";
+
   public static final String DEFAULT_RAID_LOCATION = "/raid";
   public static final String RAID_LOCATION_KEY = "hdfs.raid.locations";
   public static final String DEFAULT_RAID_TMP_LOCATION = "/tmp/raid";
@@ -98,10 +98,10 @@ public abstract class RaidNode implements RaidProtocol {
 
   public static final String RAID_DIRECTORYTRAVERSAL_SHUFFLE = "raid.directorytraversal.shuffle";
   public static final String RAID_DIRECTORYTRAVERSAL_THREADS = "raid.directorytraversal.threads";
-  
-  public static final String RAID_DISABLE_CORRUPT_BLOCK_FIXER_KEY = 
+
+  public static final String RAID_DISABLE_CORRUPT_BLOCK_FIXER_KEY =
     "raid.blockreconstruction.corrupt.disable";
-  public static final String RAID_DISABLE_DECOMMISSIONING_BLOCK_COPIER_KEY = 
+  public static final String RAID_DISABLE_DECOMMISSIONING_BLOCK_COPIER_KEY =
     "raid.blockreconstruction.decommissioning.disable";
 
   public static final String JOBUSER = "raid";
@@ -111,7 +111,7 @@ public abstract class RaidNode implements RaidProtocol {
 
     Pattern.compile(".*" + HAR_SUFFIX + "/part-.*");
 
-  public static final String RAIDNODE_CLASSNAME_KEY = "raid.classname";  
+  public static final String RAIDNODE_CLASSNAME_KEY = "raid.classname";
 
   /** RPC server */
   private Server server;
@@ -139,7 +139,7 @@ public abstract class RaidNode implements RaidProtocol {
   /** Deamon thread to delete obsolete parity files */
   PurgeMonitor purgeMonitor = null;
   Daemon purgeThread = null;
-  
+
   /** Deamon thread to har raid directories */
   Daemon harThread = null;
 
@@ -157,13 +157,13 @@ public abstract class RaidNode implements RaidProtocol {
 
   private int directoryTraversalThreads;
   private boolean directoryTraversalShuffle;
-  
+
   // statistics about RAW hdfs blocks. This counts all replicas of a block.
   public static class Statistics {
     long numProcessedBlocks; // total blocks encountered in namespace
     long processedSize;   // disk space occupied by all blocks
     long remainingSize;      // total disk space post RAID
-    
+
     long numMetaBlocks;      // total blocks in metafile
     long metaSize;           // total disk space for meta files
 
@@ -174,6 +174,7 @@ public abstract class RaidNode implements RaidProtocol {
       numMetaBlocks = 0;
       metaSize = 0;
     }
+    @Override
     public String toString() {
       long save = processedSize - (remainingSize + metaSize);
       long savep = 0;
@@ -199,7 +200,7 @@ public abstract class RaidNode implements RaidProtocol {
     private StartupOption(String arg) {this.name = arg;}
     public String getName() {return name;}
   }
-  
+
   // For unit test
   RaidNode() {}
 
@@ -207,16 +208,16 @@ public abstract class RaidNode implements RaidProtocol {
    * Start RaidNode.
    * <p>
    * The raid-node can be started with one of the following startup options:
-   * <ul> 
+   * <ul>
    * <li>{@link StartupOption#REGULAR REGULAR} - normal raid node startup</li>
    * </ul>
-   * The option is passed via configuration field: 
+   * The option is passed via configuration field:
    * <tt>fs.raidnode.startup</tt>
-   * 
-   * The conf will be modified to reflect the actual ports on which 
+   *
+   * The conf will be modified to reflect the actual ports on which
    * the RaidNode is up and running if the user passes the port as
    * <code>zero</code> in the conf.
-   * 
+   *
    * @param conf  confirguration
    * @throws IOException
    */
@@ -248,7 +249,7 @@ public abstract class RaidNode implements RaidProtocol {
     return ProtocolSignature.getProtocolSignature(
         this, protocol, clientVersion, clientMethodsHash);
   }
-  
+
   /**
    * Wait for service to finish.
    * (Normally, it runs forever.)
@@ -265,7 +266,7 @@ public abstract class RaidNode implements RaidProtocol {
       // do nothing
     }
   }
-  
+
   /**
    * Stop all RaidNode threads and wait for all to finish.
    */
@@ -309,8 +310,8 @@ public abstract class RaidNode implements RaidProtocol {
   public InetSocketAddress getListenerAddress() {
     return server.getListenerAddress();
   }
-  
-  private void initialize(Configuration conf) 
+
+  private void initialize(Configuration conf)
     throws IOException, SAXException, InterruptedException, RaidConfigurationException,
            ClassNotFoundException, ParserConfigurationException {
     this.startTime = RaidNode.now();
@@ -321,7 +322,7 @@ public abstract class RaidNode implements RaidProtocol {
     // read in the configuration
     configMgr = new ConfigManager(conf);
 
-    // create rpc server 
+    // create rpc server
     this.server = RPC.getServer(this, socAddr.getHostName(), socAddr.getPort(),
                                 handlerCount, false, conf);
 
@@ -333,19 +334,19 @@ public abstract class RaidNode implements RaidProtocol {
 
     // Create a block integrity monitor and start its thread(s)
     this.blockIntegrityMonitor = BlockIntegrityMonitor.createBlockIntegrityMonitor(conf);
-    
-    boolean useBlockFixer = 
+
+    boolean useBlockFixer =
       !conf.getBoolean(RAID_DISABLE_CORRUPT_BLOCK_FIXER_KEY, false);
-    boolean useBlockCopier = 
+    boolean useBlockCopier =
       !conf.getBoolean(RAID_DISABLE_DECOMMISSIONING_BLOCK_COPIER_KEY, false);
-    
+
     Runnable fixer = blockIntegrityMonitor.getCorruptionMonitor();
     if (useBlockFixer && (fixer != null)) {
       this.blockFixerThread = new Daemon(fixer);
       this.blockFixerThread.setName("Block Fixer");
       this.blockFixerThread.start();
     }
-    
+
     Runnable copier = blockIntegrityMonitor.getDecommissioningMonitor();
     if (useBlockCopier && (copier != null)) {
       this.blockCopierThread = new Daemon(copier);
@@ -418,7 +419,7 @@ public abstract class RaidNode implements RaidProtocol {
   public BlockIntegrityMonitor.Status getBlockIntegrityMonitorStatus() {
     return blockIntegrityMonitor.getAggregateStatus();
   }
-  
+
   public BlockIntegrityMonitor.Status getBlockFixerStatus() {
     return ((Worker)blockIntegrityMonitor.getCorruptionMonitor()).getStatus();
   }
@@ -486,7 +487,7 @@ public abstract class RaidNode implements RaidProtocol {
       }
     }
 
-    private Map<String, ScanState> scanStateMap =
+    private final Map<String, ScanState> scanStateMap =
       new HashMap<String, ScanState>();
 
     public void run() {
@@ -603,7 +604,7 @@ public abstract class RaidNode implements RaidProtocol {
             filteredPaths = selectFiles(info, allPolicies);
           } catch (Exception e) {
             LOG.info("Exception while invoking filter on policy " + info.getName() +
-                     " srcPath " + info.getSrcPath() + 
+                     " srcPath " + info.getSrcPath() +
                      " exception " + StringUtils.stringifyException(e));
             continue;
           }
@@ -620,7 +621,7 @@ public abstract class RaidNode implements RaidProtocol {
             raidFiles(info, filteredPaths);
           } catch (Exception e) {
             LOG.info("Exception while invoking action on policy " + info.getName() +
-                     " srcPath " + info.getSrcPath() + 
+                     " srcPath " + info.getSrcPath() +
                      " exception " + StringUtils.stringifyException(e));
             continue;
           }
@@ -632,7 +633,7 @@ public abstract class RaidNode implements RaidProtocol {
   /**
    * raid a list of files, this will be overridden by subclasses of RaidNode
    */
-  abstract void raidFiles(PolicyInfo info, List<FileStatus> paths) 
+  abstract void raidFiles(PolicyInfo info, List<FileStatus> paths)
     throws IOException;
 
   public abstract String raidJobsHtmlTable(boolean running);
@@ -692,18 +693,18 @@ public abstract class RaidNode implements RaidProtocol {
     LOG.info("RAID statistics " + statistics.toString());
   }
 
-  
+
   /**
    * RAID an individual file
    */
   static public boolean doRaid(Configuration conf, PolicyInfo info,
-                               FileStatus src, Statistics statistics, 
-                               Progressable reporter) 
+                               FileStatus src, Statistics statistics,
+                               Progressable reporter)
     throws IOException {
     int targetRepl = Integer.parseInt(info.getProperty("targetReplication"));
     int metaRepl = Integer.parseInt(info.getProperty("metaReplication"));
     int stripeLength = getStripeLength(conf);
-    
+
     Path destPref = getDestinationPath(info.getErasureCode(), conf);
     String simulate = info.getProperty("simulate");
     boolean doSimulate = simulate == null ? false : Boolean
@@ -725,7 +726,7 @@ public abstract class RaidNode implements RaidProtocol {
 
     // extract block locations from File system
     BlockLocation[] locations = srcFs.getFileBlockLocations(stat, 0, stat.getLen());
-    
+
     // if the file has fewer than 2 blocks, then nothing to do
     if (locations.length <= 2) {
       return false;
@@ -807,7 +808,7 @@ public abstract class RaidNode implements RaidProtocol {
     // set the modification time of the RAID file. This is done so that the modTime of the
     // RAID file reflects that contents of the source file that it has RAIDed. This should
     // also work for files that are being appended to. This is necessary because the time on
-    // on the destination namenode may not be synchronised with the timestamp of the 
+    // on the destination namenode may not be synchronised with the timestamp of the
     // source namenode.
     outFs.setTimes(outpath, stat.getModificationTime(), -1);
 
@@ -850,8 +851,8 @@ public abstract class RaidNode implements RaidProtocol {
     FileSystem srcFs = srcPath.getFileSystem(conf);
     FileStatus stat = srcFs.getFileStatus(srcPath);
     long limit = Math.min(stat.getBlockSize(), stat.getLen() - corruptOffset);
-    java.io.OutputStream out = destFs.create(recoveredBlock);    
-    
+    java.io.OutputStream out = destFs.create(recoveredBlock);
+
 	LOG.info("RaidNode starting with heavy decoder");
 	decoder.fixErasedBlock(srcFs, srcPath,
 	        ppair.getFileSystem(), ppair.getPath(),
@@ -862,12 +863,12 @@ public abstract class RaidNode implements RaidProtocol {
     return recoveredBlock;
   }
 
-  
+
   private void doHar() throws IOException, InterruptedException {
     long prevExec = 0;
     while (running) {
 
-      // The config may be reloaded by the TriggerMonitor. 
+      // The config may be reloaded by the TriggerMonitor.
       // This thread uses whatever config is currently active.
       while(now() < prevExec + configMgr.getPeriodicity()){
         Thread.sleep(SLEEP_TIME);
@@ -875,7 +876,7 @@ public abstract class RaidNode implements RaidProtocol {
 
       LOG.info("Started archive scan");
       prevExec = now();
-      
+
       // fetch all categories
       for (PolicyList category : configMgr.getAllPolicies()) {
         for (PolicyInfo info: category.getAll()) {
@@ -886,7 +887,7 @@ public abstract class RaidNode implements RaidProtocol {
               long cutoff = now() - ( Long.parseLong(str) * 24L * 3600000L );
 
               Path destPref = getDestinationPath(info.getErasureCode(), conf);
-              FileSystem destFs = destPref.getFileSystem(conf); 
+              FileSystem destFs = destPref.getFileSystem(conf);
 
               for (Path srcPath: info.getSrcPathExpanded()) {
                 // expand destination prefix
@@ -899,15 +900,15 @@ public abstract class RaidNode implements RaidProtocol {
                   // do nothing, leave stat = null;
                 }
                 if (stat != null) {
-                  LOG.info("Haring parity files for policy " + 
+                  LOG.info("Haring parity files for policy " +
                       info.getName() + " " + destPath);
                   recurseHar(info, destFs, stat, destPref.toUri().getPath(),
                       srcPath.getFileSystem(conf), cutoff, tmpHarPath);
                 }
               }
             } catch (Exception e) {
-              LOG.warn("Ignoring Exception while processing policy " + 
-                  info.getName() + " " + 
+              LOG.warn("Ignoring Exception while processing policy " +
+                  info.getName() + " " +
                   StringUtils.stringifyException(e));
             }
           }
@@ -916,7 +917,7 @@ public abstract class RaidNode implements RaidProtocol {
     }
     return;
   }
-  
+
   void recurseHar(PolicyInfo info, FileSystem destFs, FileStatus dest, String destPrefix,
       FileSystem srcFs, long cutoff, String tmpHarPath)
     throws IOException {
@@ -924,7 +925,7 @@ public abstract class RaidNode implements RaidProtocol {
     if (!dest.isDir()) {
       return;
     }
-    
+
     Path destPath = dest.getPath(); // pathname, no host:port
     String destStr = destPath.toUri().getPath();
 
@@ -949,7 +950,7 @@ public abstract class RaidNode implements RaidProtocol {
           shouldHar = false;
         } else if (one.getModificationTime() > cutoff ) {
           if (shouldHar) {
-            LOG.debug("Cannot archive " + destPath + 
+            LOG.debug("Cannot archive " + destPath +
                    " because " + one.getPath() + " was modified after cutoff");
             shouldHar = false;
           }
@@ -973,7 +974,7 @@ public abstract class RaidNode implements RaidProtocol {
           for (FileStatus status : statuses) {
             if (ParityFilePair.getParityFile(info.getErasureCode(),
                 status.getPath().makeQualified(srcFs), conf) == null ) {
-              LOG.debug("Cannot archive " + destPath + 
+              LOG.debug("Cannot archive " + destPath +
                   " because it doesn't contain parity file for " +
                   status.getPath().makeQualified(srcFs) + " on destination " +
                   destPathPrefix);
@@ -983,24 +984,24 @@ public abstract class RaidNode implements RaidProtocol {
           }
         }
       }
-      
+
     }
 
     if ( shouldHar ) {
       LOG.info("Archiving " + dest.getPath() + " to " + tmpHarPath );
       singleHar(info, destFs, dest, tmpHarPath, harBlockSize);
     }
-  } 
+  }
 
-  
+
   private void singleHar(PolicyInfo info, FileSystem destFs,
        FileStatus dest, String tmpHarPath, long harBlockSize) throws IOException {
-    
+
     Random rand = new Random();
     Path root = new Path("/");
     Path qualifiedPath = dest.getPath().makeQualified(destFs);
     String harFileDst = qualifiedPath.getName() + HAR_SUFFIX;
-    String harFileSrc = qualifiedPath.getName() + "-" + 
+    String harFileSrc = qualifiedPath.getName() + "-" +
                                 rand.nextLong() + "-" + HAR_SUFFIX;
 
     short metaReplication =
@@ -1013,7 +1014,7 @@ public abstract class RaidNode implements RaidProtocol {
     args[0] = "-Ddfs.replication=" + metaReplication;
     args[1] = "-archiveName";
     args[2] = harFileSrc;
-    args[3] = "-p"; 
+    args[3] = "-p";
     args[4] = root.makeQualified(destFs).toString();
     args[5] = qualifiedPath.toUri().getPath().substring(1);
     args[6] = tmpHarPath.toString();
@@ -1032,13 +1033,13 @@ public abstract class RaidNode implements RaidProtocol {
     } finally {
       destFs.delete(tmpHar, true);
     }
-    
+
     if (ret != 0){
       throw new IOException("Error while creating archive " + ret);
     }
     return;
   }
-  
+
   /**
    * Periodically generates HAR files
    */
@@ -1151,7 +1152,7 @@ public abstract class RaidNode implements RaidProtocol {
     case XOR:
         return 1;
     case RS:
-        return rsParityLength(conf);
+        return rsParityLength(conf)+paritySizeSRC(conf);
     default:
         return -1;
     }
@@ -1163,8 +1164,8 @@ public abstract class RaidNode implements RaidProtocol {
       case XOR:
         return new XOREncoder(conf, stripeLength);
       case RS:
-        return new ReedSolomonEncoder(conf, stripeLength, 
-        		rsParityLength(conf), rsSimpleParityDegree(conf));
+        return new ReedSolomonEncoder(conf, stripeLength,
+        		rsParityLength(conf), paritySizeSRC(conf));
       default:
         return null;
     }
@@ -1194,12 +1195,12 @@ public abstract class RaidNode implements RaidProtocol {
   public static int rsParityLength(Configuration conf) {
     return conf.getInt(RS_PARITY_LENGTH_KEY, RS_PARITY_LENGTH_DEFAULT);
   }
-  
+
   /**
-   * Obtain simpleParityDegree from configuration
+   * Obtain parity size for SRC from configuration
    */
-  public static int rsSimpleParityDegree(Configuration conf) {
-    return conf.getInt(RS_SIMPLEPARITY_DEGREE_KEY, RS_SIMPLEPARITY_DEGREE_DEFAULT);
+  public static int paritySizeSRC(Configuration conf) {
+    return conf.getInt(SRC_PARITY_LENGTH_KEY, SRC_PARITY_LENGTH_DEFAULT);
   }
 
   static boolean isParityHarPartFile(Path p) {
@@ -1214,17 +1215,17 @@ public abstract class RaidNode implements RaidProtocol {
     return System.currentTimeMillis();
   }
 
-  /**                       
+  /**
    * Make an absolute path relative by stripping the leading /
-   */   
+   */
   static Path makeRelative(Path path) {
     if (!path.isAbsolute()) {
       return path;
-    }          
+    }
     String p = path.toUri().getPath();
     String relative = p.substring(1, p.length());
     return new Path(relative);
-  } 
+  }
 
   private static void printUsage() {
     System.err.println("Usage: java RaidNode ");
@@ -1243,7 +1244,7 @@ public abstract class RaidNode implements RaidProtocol {
   }
 
   /**
-   * Create an instance of the appropriate subclass of RaidNode 
+   * Create an instance of the appropriate subclass of RaidNode
    */
   public static RaidNode createRaidNode(Configuration conf)
     throws ClassNotFoundException {
@@ -1269,7 +1270,7 @@ public abstract class RaidNode implements RaidProtocol {
   }
 
   /**
-   * Create an instance of the RaidNode 
+   * Create an instance of the RaidNode
    */
   public static RaidNode createRaidNode(String argv[], Configuration conf)
     throws IOException, ClassNotFoundException {

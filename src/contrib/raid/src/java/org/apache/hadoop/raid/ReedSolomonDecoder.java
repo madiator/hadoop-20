@@ -46,15 +46,17 @@ public class ReedSolomonDecoder extends Decoder {
   Semaphore decodeOps;
 
   public ReedSolomonDecoder(
-    Configuration conf, int stripeSize, int paritySize, int simpleParityDegree) {
-    super(conf, stripeSize, paritySize,simpleParityDegree);
+    Configuration conf, int stripeSize, int paritySizeRS, int paritySizeSRC) {
+    super(conf, stripeSize, paritySizeRS, paritySizeSRC);
+    this.paritySize = paritySizeRS + paritySizeSRC; //just in case
     this.reedSolomonCode = new ReedSolomonCode[parallelism];
     for (int i = 0; i < parallelism; i++) {
-      reedSolomonCode[i] = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
+      reedSolomonCode[i] =
+        new ReedSolomonCode(stripeSize, paritySizeRS, paritySizeSRC);
     }
     decodeOps = new Semaphore(parallelism);
     LOG.info("Initialized ReedSolomonDecoder" +
-    		" with simpleParityDegree = "+simpleParityDegree);
+    		" with paritySizeSRC = "+paritySizeSRC);
   }
 
   @Override
@@ -352,10 +354,13 @@ public class ReedSolomonDecoder extends Decoder {
 
   public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch,
       boolean doLightDecode) {
-    int paritySizeRS =  simpleParityDegree
+    int paritySizeRS = paritySize - paritySizeSRC;
+    //TODO: fix the below about simpleParityDegree
+    int simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRC;
+    /*int paritySizeRS =  simpleParityDegree
                         * (paritySize + stripeSize) / (simpleParityDegree + 1)
-                        - stripeSize;
-    int paritySizeSRC = paritySize - paritySizeRS;
+                        - stripeSize;*/
+    //int paritySizeSRC = paritySize - paritySizeRS;
     int flagErased = 0;
     int locationsLength = 0;
     double singleErasureGroup;
@@ -384,7 +389,7 @@ public class ReedSolomonDecoder extends Decoder {
       // Find the simpleXOR group that the erased block is a member of
       if (erasedLocation[0] >= paritySizeSRC) {
         singleErasureGroup = Math.ceil(
-                            ((float)(erasedLocation[0] - paritySizeSRC + 1)) /
+                            ((erasedLocation[0] - paritySizeSRC + 1)) /
                             ((float)simpleParityDegree));
        }
       else{

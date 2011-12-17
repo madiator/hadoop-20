@@ -46,7 +46,7 @@ public class TestErasureCodes extends TestCase {
       //		+paritySizeSRC+", "+
       //		+simpleParityDegree);
 
-      ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
+      ErasureCode ec = new ReedSolomonCode(stripeSize, paritySizeRS, paritySizeSRC);
       for (int m = 0; m < TEST_TIMES; m++) {
         int symbolMax = (int) Math.pow(2, ec.symbolSize());
         int[] message = new int[stripeSize];
@@ -81,10 +81,10 @@ public class TestErasureCodes extends TestCase {
 
   public void testRSPerformance() {
     int stripeSize = 10;
-    int paritySize = 6;
-    int simpleParityDegree = 7;
-    ErasureCode ec = new ReedSolomonCode(stripeSize, paritySize,
-        simpleParityDegree);
+    int paritySizeRS = 4;
+    int paritySizeSRC = 2;
+    int paritySize = paritySizeRS + paritySizeSRC;
+    ErasureCode ec = new ReedSolomonCode(stripeSize, paritySizeRS, paritySizeSRC);
     int symbolMax = (int) Math.pow(2, ec.symbolSize());
     byte[][] message = new byte[stripeSize][];
     int bufsize = 1024 * 1024 * 10;
@@ -190,13 +190,14 @@ public class TestErasureCodes extends TestCase {
 
   public void testComputeErrorLocations() {
     for (int i = 0; i < TEST_TIMES; ++i) {
-      verifyErrorLocations(10, 6, 7, 1);
-      verifyErrorLocations(10, 6, 7, 2);
+      verifyErrorLocations(10, 4, 2, 1);
+      verifyErrorLocations(10, 4, 2, 2);
     }
   }
 
-  public void verifyErrorLocations(int stripeSize, int paritySize,
-      int simpleParityDegree, int errors) {
+  public void verifyErrorLocations(int stripeSize, int paritySizeRS,
+      int paritySizeSRC, int errors) {
+    int paritySize = paritySizeRS + paritySizeSRC;
     int[] message = new int[stripeSize];
     int[] parity = new int[paritySize];
     Set<Integer> errorLocations = new HashSet<Integer>();
@@ -207,7 +208,7 @@ public class TestErasureCodes extends TestCase {
       int loc = RAND.nextInt(stripeSize + paritySize);
       errorLocations.add(loc);
     }
-    ReedSolomonCode codec = new ReedSolomonCode(stripeSize, paritySize, simpleParityDegree);
+    ReedSolomonCode codec = new ReedSolomonCode(stripeSize, paritySizeRS, paritySizeSRC);
     codec.encode(message, parity);
     int[] data = combineArrays(parity, message);
     for (Integer i : errorLocations) {
