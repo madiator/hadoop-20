@@ -54,10 +54,11 @@ abstract class BlockReconstructor extends Configured {
 
   private String xorPrefix;
   private String rsPrefix;
+  private String srcPrefix;
   private final XOREncoder xorEncoder;
   private final XORDecoder xorDecoder;
-  private final ReedSolomonEncoder rsEncoder;
-  private final ReedSolomonDecoder rsDecoder;
+  //private final ReedSolomonEncoder rsEncoder;
+  //private final ReedSolomonDecoder rsDecoder;
   private static int dataTransferProtocolVersion = -1;
 
   BlockReconstructor(Configuration conf) throws IOException {
@@ -71,15 +72,19 @@ abstract class BlockReconstructor extends Configured {
     if (!rsPrefix.endsWith(Path.SEPARATOR)) {
       rsPrefix += Path.SEPARATOR;
     }
+    srcPrefix = RaidNode.srcDestinationPath(getConf()).toUri().getPath();
+    if (!srcPrefix.endsWith(Path.SEPARATOR)) {
+      srcPrefix += Path.SEPARATOR;
+    }
     int stripeLength = RaidNode.getStripeLength(getConf());
     xorEncoder = new XOREncoder(getConf(), stripeLength);
     xorDecoder = new XORDecoder(getConf(), stripeLength);
-    int paritySizeRS = RaidNode.rsParityLength(getConf());
+    /* int paritySizeRS = RaidNode.rsParityLength(getConf());
     int paritySizeSRC = RaidNode.paritySizeSRC(getConf());
     rsEncoder = new ReedSolomonEncoder(getConf(), stripeLength,
     		paritySizeRS, paritySizeSRC);
     rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength,
-    		paritySizeRS, paritySizeSRC);
+    		paritySizeRS, paritySizeSRC); */
 
   }
 
@@ -123,6 +128,21 @@ abstract class BlockReconstructor extends Configured {
   }
 
   /**
+   * checks whether file is SRC parity file
+   */
+  boolean isSRCParityFile(Path p) {
+    String pathStr = p.toUri().getPath();
+    return isSRCParityFile(pathStr);
+  }
+
+  boolean isSRCParityFile(String pathStr) {
+    if (pathStr.contains(RaidNode.HAR_SUFFIX)) {
+      return false;
+    }
+    return pathStr.startsWith(srcPrefix);
+  }
+
+  /**
    * Fix a file, report progess.
    *
    * @return true if file was reconstructed, false if no reconstruction
@@ -140,11 +160,31 @@ abstract class BlockReconstructor extends Configured {
       return processParityFile(srcPath, xorEncoder, progress);
     }
 
+    // The following values cannot be global.
+    // A file can be either RS encoded or SRC encoded.
+    int stripeLength = RaidNode.getStripeLength(getConf());
+    int paritySizeRS = RaidNode.rsParityLength(getConf());
+    int paritySizeSRC = RaidNode.paritySizeSRC(getConf());
+
     // The lost file is a ReedSolomon parity file
     if (isRsParityFile(srcPath)) {
-      return processParityFile(srcPath, rsEncoder, progress);
+      return processParityFile(
+          srcPath,
+          new ReedSolomonEncoder(getConf(), stripeLength, paritySizeRS, 0),
+          progress);
     }
 
+    // The lost file is a Simple Regenerating Code parity file
+    if (isSRCParityFile(srcPath)) {
+      return processParityFile(
+          srcPath,
+          new ReedSolomonEncoder(getConf(), stripeLength,
+              paritySizeRS, paritySizeSRC),
+          progress);
+    }
+
+    ReedSolomonDecoder rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength,
+        paritySizeRS, paritySizeSRC);
     // The lost file is a source file. It might have a Reed-Solomon parity
     // or XOR parity or both.
     // Look for the Reed-Solomon parity file first. It is possible that the XOR

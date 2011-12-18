@@ -18,5 +18,5 @@
 package org.apache.hadoop.raid;
 
 public enum ErasureCodeType {
-  XOR, RS;
+  XOR, RS, SRC;
 }

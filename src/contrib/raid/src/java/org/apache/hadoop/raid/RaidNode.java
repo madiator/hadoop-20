@@ -96,6 +96,13 @@ public abstract class RaidNode implements RaidProtocol {
   public static final String DEFAULT_RAIDRS_HAR_TMP_LOCATION = "/tmp/raidrs_har";
   public static final String RAIDRS_HAR_TMP_LOCATION_KEY = "fs.raidrs.hartmpdir";
 
+  public static final String DEFAULT_RAIDSRC_LOCATION = "/raidsrc";
+  public static final String RAIDSRC_LOCATION_KEY = "hdfs.raidsrc.locations";
+  public static final String DEFAULT_RAIDSRC_TMP_LOCATION = "/tmp/raidsrc";
+  public static final String RAIDSRC_TMP_LOCATION_KEY = "fs.raidsrc.tmpdir";
+  public static final String DEFAULT_RAIDSRC_HAR_TMP_LOCATION = "/tmp/raidsrc_har";
+  public static final String RAIDSRC_HAR_TMP_LOCATION_KEY = "fs.raidsrc.hartmpdir";
+
   public static final String RAID_DIRECTORYTRAVERSAL_SHUFFLE = "raid.directorytraversal.shuffle";
   public static final String RAID_DIRECTORYTRAVERSAL_THREADS = "raid.directorytraversal.threads";
 
@@ -1111,6 +1118,28 @@ public abstract class RaidNode implements RaidProtocol {
   }
 
   /**
+   * Return the destination path for Simple Regenerating Code parity files
+   */
+  public static Path srcDestinationPath(Configuration conf, FileSystem fs) {
+    String loc = conf.get(RAIDSRC_LOCATION_KEY, DEFAULT_RAIDSRC_LOCATION);
+    Path p = new Path(loc.trim());
+    p = p.makeQualified(fs);
+    return p;
+  }
+
+  /**
+   * Return the destination path for Simple Regenerating Code parity files
+   */
+  public static Path srcDestinationPath(Configuration conf)
+    throws IOException {
+    String loc = conf.get(RAIDSRC_LOCATION_KEY, DEFAULT_RAIDSRC_LOCATION);
+    Path p = new Path(loc.trim());
+    FileSystem fs = FileSystem.get(p.toUri(), conf);
+    p = p.makeQualified(fs);
+    return p;
+  }
+
+  /**
    * Return the destination path for XOR parity files
    */
   public static Path xorDestinationPath(Configuration conf, FileSystem fs) {
@@ -1142,6 +1171,8 @@ public abstract class RaidNode implements RaidProtocol {
         return xorDestinationPath(conf);
       case RS:
         return rsDestinationPath(conf);
+      case SRC:
+        return srcDestinationPath(conf);
       default:
         return null;
     }
@@ -1152,6 +1183,8 @@ public abstract class RaidNode implements RaidProtocol {
     case XOR:
         return 1;
     case RS:
+      return rsParityLength(conf);
+    case SRC:
         return rsParityLength(conf)+paritySizeSRC(conf);
     default:
         return -1;
@@ -1164,6 +1197,9 @@ public abstract class RaidNode implements RaidProtocol {
       case XOR:
         return new XOREncoder(conf, stripeLength);
       case RS:
+        return new ReedSolomonEncoder(conf, stripeLength,
+            rsParityLength(conf), 0);
+      case SRC:
         return new ReedSolomonEncoder(conf, stripeLength,
         		rsParityLength(conf), paritySizeSRC(conf));
       default:
