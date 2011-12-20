@@ -54,7 +54,6 @@ abstract class BlockReconstructor extends Configured {
 
   private String xorPrefix;
   private String rsPrefix;
-  private String srcPrefix;
   private final XOREncoder xorEncoder;
   private final XORDecoder xorDecoder;
   //private final ReedSolomonEncoder rsEncoder;
@@ -71,10 +70,6 @@ abstract class BlockReconstructor extends Configured {
     rsPrefix = RaidNode.rsDestinationPath(getConf()).toUri().getPath();
     if (!rsPrefix.endsWith(Path.SEPARATOR)) {
       rsPrefix += Path.SEPARATOR;
-    }
-    srcPrefix = RaidNode.srcDestinationPath(getConf()).toUri().getPath();
-    if (!srcPrefix.endsWith(Path.SEPARATOR)) {
-      srcPrefix += Path.SEPARATOR;
     }
     int stripeLength = RaidNode.getStripeLength(getConf());
     xorEncoder = new XOREncoder(getConf(), stripeLength);
@@ -96,6 +91,25 @@ abstract class BlockReconstructor extends Configured {
     return dataTransferProtocolVersion;
   }
 
+  private boolean isHarFile(String path) {
+    return path.lastIndexOf(RaidNode.HAR_SUFFIX) != -1;
+  }
+
+  /**
+   * Get path for the corresponding source file for a valid parity
+   * file. Returns null if it does not exists
+   * @param parity the toUri path of the parity file
+   * @return the toUri path of the source file
+   */
+  String getSourceFile(String parity, String prefix) throws IOException {
+    if (isHarFile(parity)) {
+      return null;
+    }
+    // remove the prefix
+    String src = "/"+parity.substring(prefix.length());
+
+    return src;
+  }
 
   /**
    * checks whether file is xor parity file
@@ -112,38 +126,75 @@ abstract class BlockReconstructor extends Configured {
     return pathStr.startsWith(xorPrefix);
   }
 
+  int getNumParities(Path p) throws IOException{
+    String pathStr = p.toUri().getPath();
+    int stripeLength = RaidNode.getStripeLength(getConf());
+    DistributedFileSystem parityFs = getDFS(p);
+    FileStatus parityStat = parityFs.getFileStatus(p);
+
+    String srcFile = getSourceFile(pathStr, rsPrefix);
+    DistributedFileSystem srcFs = getDFS(new Path(srcFile));
+    FileStatus srcStat = srcFs.getFileStatus(new Path(srcFile));
+    long parityBlockSize = parityStat.getBlockSize();
+    long srcBlockSize = srcStat.getBlockSize();
+    long parityFileSize = parityStat.getLen();
+    long srcFileSize = srcStat.getLen();
+
+    int numParityBlocks = (int) Math.ceil((double)parityFileSize/parityBlockSize);
+    int numSrcBlocks = (int) Math.ceil((double)srcFileSize/srcBlockSize);
+    int numParities = (int) Math.ceil((double)numParityBlocks*stripeLength/numSrcBlocks);
+    LOG.info("isRsParity: parityblockSize = "+parityBlockSize+", " +
+    		"sourceblocksize = "+srcBlockSize +
+        "parityFileSize = "+parityFileSize+", " +
+            "srcFileSize = "+srcFileSize+", numParities = "+numParities);
+    return numParities;
+  }
   /**
    * checks whether file is rs parity file
    */
-  boolean isRsParityFile(Path p) {
+  boolean isRsParityFile(Path p) throws IOException{
     String pathStr = p.toUri().getPath();
-    return isRsParityFile(pathStr);
+    if(isRsParityFile(pathStr)) {
+      int numParities = getNumParities(p);
+      int paritySizeRS = RaidNode.rsParityLength(getConf());
+      LOG.info("numParities = "+numParities+", paritySizeRS = "+paritySizeRS);
+      if(numParities == paritySizeRS)
+        return true;
+    }
+    return false;
   }
 
   boolean isRsParityFile(String pathStr) {
     if (pathStr.contains(RaidNode.HAR_SUFFIX)) {
       return false;
     }
-    return pathStr.startsWith(rsPrefix);
+    boolean retValue = (pathStr.startsWith(rsPrefix) || pathStr.startsWith("hdfs://localhost:54310"+rsPrefix));
+    LOG.info("retValue = "+retValue);
+    return retValue;
   }
 
   /**
    * checks whether file is SRC parity file
    */
-  boolean isSRCParityFile(Path p) {
+  boolean isSRCParityFile(Path p) throws IOException{
     String pathStr = p.toUri().getPath();
-    return isSRCParityFile(pathStr);
+    if(isRsParityFile(pathStr)) {
+      int numParities = getNumParities(p);
+      int paritySizeRS = RaidNode.rsParityLength(getConf());
+      int paritySizeSRC = RaidNode.paritySizeSRC(getConf());
+      LOG.info("numParities = "+numParities+"" +
+      		", paritySizeRS  = "+paritySizeRS+"" +
+      				", paritySizeSRC = "+paritySizeSRC);
+      if(numParities == paritySizeRS + paritySizeSRC)
+        return true;
+    }
+    return false;
   }
 
-  boolean isSRCParityFile(String pathStr) {
-    if (pathStr.contains(RaidNode.HAR_SUFFIX)) {
-      return false;
-    }
-    return pathStr.startsWith(srcPrefix);
-  }
+
 
   /**
-   * Fix a file, report progess.
+   * Fix a file, report progress.
    *
    * @return true if file was reconstructed, false if no reconstruction
    * was necessary or possible.
@@ -183,8 +234,8 @@ abstract class BlockReconstructor extends Configured {
           progress);
     }
 
-    ReedSolomonDecoder rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength,
-        paritySizeRS, paritySizeSRC);
+    //ReedSolomonDecoder rsDecoder = new ReedSolomonDecoder(getConf(), stripeLength,
+    //    paritySizeRS, paritySizeSRC);
     // The lost file is a source file. It might have a Reed-Solomon parity
     // or XOR parity or both.
     // Look for the Reed-Solomon parity file first. It is possible that the XOR
@@ -193,7 +244,16 @@ abstract class BlockReconstructor extends Configured {
         ErasureCodeType.RS, srcPath, getConf());
     Decoder decoder = null;
     if (ppair != null) {
-      decoder = rsDecoder;
+      LOG.info("ppair path = "+ppair.getPath()+"" +
+      		", isRS = "+isRsParityFile(ppair.getPath())+"" +
+      				", isSRC = "+isSRCParityFile(ppair.getPath()));
+      if(isRsParityFile(ppair.getPath()))
+        decoder = new ReedSolomonDecoder(getConf(), stripeLength,
+            paritySizeRS, 0);
+      else
+        decoder = new ReedSolomonDecoder(getConf(), stripeLength,
+            paritySizeRS, paritySizeSRC);
+
     } else  {
       ppair = ParityFilePair.getParityFile(
           ErasureCodeType.XOR, srcPath, getConf());
@@ -488,12 +548,20 @@ abstract class BlockReconstructor extends Configured {
           throw new IOException(msg);
         }
         Path parityFile = new Path(entry.fileName);
+        int stripeLength = RaidNode.getStripeLength(getConf());
+        int paritySizeRS = RaidNode.rsParityLength(getConf());
+        int paritySizeSRC = RaidNode.paritySizeSRC(getConf());
         Encoder encoder;
         if (isXorParityFile(parityFile)) {
           encoder = xorEncoder;
         } else if (isRsParityFile(parityFile)) {
-          encoder = rsEncoder;
-        } else {
+          encoder = new ReedSolomonEncoder(getConf(), stripeLength,
+              paritySizeRS, 0);
+        } else if (isSRCParityFile(parityFile)) {
+          encoder = new ReedSolomonEncoder(getConf(), stripeLength,
+              paritySizeRS, paritySizeSRC);
+        }
+        else {
           String msg = "Could not figure out parity file correctly";
           LOG.warn(msg);
           throw new IOException(msg);

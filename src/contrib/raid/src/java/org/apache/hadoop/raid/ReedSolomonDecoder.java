@@ -355,19 +355,18 @@ public class ReedSolomonDecoder extends Decoder {
   public void blocksToFetch(int[] erasedLocation, int[] locationsToFetch,
       boolean doLightDecode) {
     int paritySizeRS = paritySize - paritySizeSRC;
+    int simpleParityDegree = -1;
     //TODO: fix the below about simpleParityDegree
-    int simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRC;
-    /*int paritySizeRS =  simpleParityDegree
-                        * (paritySize + stripeSize) / (simpleParityDegree + 1)
-                        - stripeSize;*/
-    //int paritySizeSRC = paritySize - paritySizeRS;
+    if(paritySizeSRC>0)
+      simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRC;
+
     int flagErased = 0;
     int locationsLength = 0;
     double singleErasureGroup;
     LOG.info("blocksToFetch: doLightDecode is "+doLightDecode);
     LOG.info("erasedLocation "+convertArrayToString(erasedLocation));
 
-    if(!doLightDecode) {
+    if((!doLightDecode)||(paritySizeSRC==0)) {
       for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
         locationsToFetch[i] = 1;
       }
