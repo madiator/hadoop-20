@@ -63,6 +63,13 @@
 </property>
 
 <property>
+  <name>hdfs.raidrs.paritylength</name>
+  <value>4</value>
+  <description>The number of parity blocks generated from stripeLength number of blocks if pure RS coding is used (FB's version). 
+  Change this when using FB version and no need to change rsparitylength and srcparitylength.</description>
+</property>
+
+<property>
   <name>hdfs.raidrs.rsparitylength</name>
   <value>4</value>
   <description>The number of RS parity blocks generated from stripeLength number of blocks</description>
