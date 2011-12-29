@@ -36,7 +36,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
-import org.apache.hadoop.hdfs.server.namenode.BlockPlacementPolicyDefault;
 import org.apache.hadoop.net.DNSToSwitchMapping;
 import org.apache.hadoop.net.NetworkTopology;
 import org.apache.hadoop.net.Node;
@@ -46,18 +45,18 @@ import org.apache.hadoop.util.StringUtils;
 
 /**
  * This BlockPlacementPolicy uses a simple heuristic, random placement of
- * the replicas of a newly-created block, for the purpose of spreading out the 
- * group of blocks which used by RAID for recovering each other. 
- * This is important for the availability of the blocks. 
- * 
+ * the replicas of a newly-created block, for the purpose of spreading out the
+ * group of blocks which used by RAID for recovering each other.
+ * This is important for the availability of the blocks.
+ *
  * Replication of an existing block continues to use the default placement
  * policy.
- * 
+ *
  * This simple block placement policy does not guarantee that
  * blocks on the RAID stripe are on different nodes. However, BlockMonitor
  * will periodically scans the raided files and will fix the placement
- * if it detects violation. 
- * 
+ * if it detects violation.
+ *
  * This class can be used by multiple threads. It has to be thread safe.
  */
 public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
@@ -83,12 +82,14 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
   public void initialize(Configuration conf,  FSClusterStats stats,
                          NetworkTopology clusterMap, HostsFileReader hostsReader,
                          DNSToSwitchMapping dnsToSwitchMapping, FSNamesystem namesystem) {
-    super.initialize(conf, stats, clusterMap, 
+    super.initialize(conf, stats, clusterMap,
                      hostsReader, dnsToSwitchMapping, namesystem);
+    LOG.info("BBBB: BlockPlacementPolicyRaid initialized");
     this.conf = conf;
     this.namesystem = namesystem;
     this.stripeLength = RaidNode.getStripeLength(conf);
-    this.rsParityLength = RaidNode.rsParityLength(conf);
+    //this.rsParityLength = RaidNode.rsParityLength(conf); //earlier
+    this.rsParityLength = RaidNode.rsParityLength(conf) + RaidNode.paritySizeSRC(conf); //mahesh
     this.xorParityLength = 1;
     this.cachedLocatedBlocks = new CachedLocatedBlocks(conf, namesystem);
     this.cachedFullPathNames = new CachedFullPathNames(conf, namesystem);
@@ -115,7 +116,12 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       long blocksize) {
     try {
       FileType type = getFileType(srcPath);
+      LOG.info("BBBB: in chooseTarget, numOfReplicas = "+numOfReplicas);
+      LOG.info("BBBB: in chooseTarget, srcPath = "+srcPath);
+      LOG.info("BBBB: in chooseTarge, file type = "+type);
+      LOG.info("BBBB: length of chosen nodes = "+chosenNodes.size());
       if (type == FileType.NOT_RAID) {
+        LOG.info("BBBB: type is NOT_RAID");
         return super.chooseTarget(
             srcPath, numOfReplicas, writer, chosenNodes, blocksize);
       }
@@ -126,6 +132,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       }
       chooseRandom(numOfReplicas, "/", excludedNodes, blocksize,
           1, results);
+      LOG.info("BBBB: results size = "+results.size());
       return results.toArray(new DatanodeDescriptor[results.size()]);
     } catch (Exception e) {
       FSNamesystem.LOG.debug(
@@ -238,8 +245,8 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
    * node and rack. If even, compare the remaining space on the datanodes.
    */
   class NodeComparator implements Comparator<DatanodeDescriptor> {
-    private Map<String, Integer> nodeBlockCount;
-    private Map<String, Integer> rackBlockCount;
+    private final Map<String, Integer> nodeBlockCount;
+    private final Map<String, Integer> rackBlockCount;
     private NodeComparator(Map<String, Integer> nodeBlockCount,
                            Map<String, Integer> rackBlockCount) {
       this.nodeBlockCount = nodeBlockCount;
@@ -421,12 +428,12 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
    * Cache results for FSInodeInfo.getFullPathName()
    */
   static class CachedFullPathNames {
-    private Cache<INodeWithHashCode, String> cacheInternal;
-    private FSNamesystem namesystem;
+    private final Cache<INodeWithHashCode, String> cacheInternal;
+    private final FSNamesystem namesystem;
 
     CachedFullPathNames(final Configuration conf, final FSNamesystem namesystem) {
       this.namesystem = namesystem;
-      this.cacheInternal = new Cache<INodeWithHashCode, String>(conf) {  
+      this.cacheInternal = new Cache<INodeWithHashCode, String>(conf) {
         @Override
         public String getDirectly(INodeWithHashCode inode) throws IOException {
           namesystem.readLock();
@@ -438,7 +445,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
         }
       };
     }
-      
+
     private static class INodeWithHashCode {
       FSInodeInfo inode;
       INodeWithHashCode(FSInodeInfo inode) {
@@ -466,7 +473,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
    * Cache results for FSNamesystem.getBlockLocations()
    */
   static class CachedLocatedBlocks extends Cache<String, List<LocatedBlock>> {
-    private FSNamesystem namesystem;
+    private final FSNamesystem namesystem;
 
     CachedLocatedBlocks(Configuration conf, FSNamesystem namesystem) {
       super(conf);
@@ -489,12 +496,12 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
   }
 
   private static abstract class Cache<K, V> {
-    private Map<K, ValueWithTime> cache;
+    private final Map<K, ValueWithTime> cache;
     final private long cacheTimeout;
     final private int maxEntries;
     // The timeout is long but the consequence of stale value is not serious
     Cache(Configuration conf) {
-      this.cacheTimeout = 
+      this.cacheTimeout =
         conf.getLong("raid.blockplacement.cache.timeout", 5000L); // 5 seconds
       this.maxEntries =
         conf.getInt("raid.blockplacement.cache.size", 1000);  // 1000 entries
