@@ -57,6 +57,12 @@
 </property>
 
 <property>
+  <name>dfs.block.replicator.classname</name>
+  <value>org.apache.hadoop.hdfs.server.namenode.BlockPlacementPolicyRaid</value>
+  <description>Placement policy</description>
+</property>
+
+<property>
   <name>hdfs.raid.stripeLength</name>
   <value>10</value>
   <description>The stripe length for the code. stripeLength number of blocks are used for coding for RS coding</description>
