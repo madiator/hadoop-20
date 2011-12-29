@@ -69,6 +69,13 @@
 </property>
 
 <property>
+  <name>hdfs.raidrs.paritylength</name>
+  <value>4</value>
+  <description>The number of parity blocks generated from stripeLength number of blocks if pure RS coding is used (FB's version). 
+  This should not be accessed, but is in place for safety, just so if master branch is used along with this hdfs-site file</description>
+</property>
+
+<property>
   <name>hdfs.raidrs.rsparitylength</name>
   <value>4</value>
   <description>The number of RS parity blocks generated from stripeLength number of blocks</description>
@@ -76,7 +83,7 @@
 
 <property>
   <name>hdfs.raidrs.srcparitylength</name>
-  <value>0</value>
+  <value>2</value>
   <description>The number of SRC blocks. If its zero we will use pure RS</description>
 </property>
 
