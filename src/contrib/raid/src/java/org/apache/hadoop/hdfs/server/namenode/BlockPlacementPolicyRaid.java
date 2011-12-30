@@ -115,6 +115,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       long blocksize) {
     try {
       FileType type = getFileType(srcPath);
+      LOG.info("FileType of " + srcPath + " " + type);
       if (type == FileType.NOT_RAID) {
         return super.chooseTarget(
             srcPath, numOfReplicas, writer, chosenNodes, blocksize);
@@ -128,7 +129,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
           1, results);
       return results.toArray(new DatanodeDescriptor[results.size()]);
     } catch (Exception e) {
-      FSNamesystem.LOG.debug(
+      FSNamesystem.LOG.error(
         "Error happend when choosing datanode to write:" +
         StringUtils.stringifyException(e));
       return super.chooseTarget(srcPath, numOfReplicas, writer,
