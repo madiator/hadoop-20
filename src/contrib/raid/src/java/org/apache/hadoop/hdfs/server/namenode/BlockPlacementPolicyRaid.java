@@ -135,8 +135,8 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       LOG.info("BBBB: results size = "+results.size());
       return results.toArray(new DatanodeDescriptor[results.size()]);
     } catch (Exception e) {
-      FSNamesystem.LOG.debug(
-        "Error happend when choosing datanode to write:" +
+      FSNamesystem.LOG.info(
+        "BBB Error happend when choosing datanode to write:" +
         StringUtils.stringifyException(e));
       return super.chooseTarget(srcPath, numOfReplicas, writer,
                                 chosenNodes, blocksize);
@@ -177,7 +177,7 @@ public class BlockPlacementPolicyRaid extends BlockPlacementPolicyDefault {
       return super.chooseReplicaToDelete(
           inode, block, replicationFactor, first, second);
     } catch (Exception e) {
-      LOG.debug("Failed to choose the correct replica to delete", e);
+      LOG.info("BBB Failed to choose the correct replica to delete", e);
       return super.chooseReplicaToDelete(
           inode, block, replicationFactor, first, second);
     }

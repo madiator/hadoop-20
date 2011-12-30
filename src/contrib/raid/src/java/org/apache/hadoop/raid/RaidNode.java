@@ -723,6 +723,8 @@ public abstract class RaidNode implements RaidProtocol {
       int stripeLength) throws IOException {
     Path p = stat.getPath();
     FileSystem srcFs = p.getFileSystem(conf);
+    LOG.info("CCCC File"+p.getName());
+    LOG.info("CCCC "+srcFs.getUri().toString()+", "+srcFs.getClass());
 
     // extract block locations from File system
     BlockLocation[] locations = srcFs.getFileBlockLocations(stat, 0, stat.getLen());
