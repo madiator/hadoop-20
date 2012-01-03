@@ -26,6 +26,7 @@ public class ReedSolomonCode implements ErasureCode {
   private final int paritySize;
   private final int paritySizeRS;
   private final int paritySizeSRC;
+  private final int paritySizeSRCFull;
   private final int simpleParityDegree;
   private final int[] generatingPolynomial;
   private final int PRIMITIVE_ROOT = 2;
@@ -42,19 +43,20 @@ public class ReedSolomonCode implements ErasureCode {
     this.stripeSize = stripeSize;
     assert(stripeSize + paritySize < GF.getFieldSize());
 
-    if(paritySizeSRC>0)
-      simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRC;
-    else
+    if(paritySizeSRC>0) {
+      paritySizeSRCFull = paritySizeSRC + 1;
+      simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRCFull;
+    }
+    else {
       simpleParityDegree = -1;
-
-    //TODO: fix above else condition and make sure the code runs RS if paritySizeSRC = 0;
-
+      this.paritySizeSRCFull = 0;
+    }
 
     this.errSignature = new int[paritySizeRS];
-    this.paritySymbolLocations = new int[paritySizeRS+paritySizeSRC];
+    this.paritySymbolLocations = new int[paritySizeRS + paritySizeSRCFull];
     this.dataBuff = new int[paritySizeRS + stripeSize];
 
-    for (int i = 0; i < paritySizeRS+paritySizeSRC; i++) {
+    for (int i = 0; i < paritySizeRS + paritySizeSRCFull; i++) {
       paritySymbolLocations[i] = i;
     }
 
@@ -87,7 +89,7 @@ public class ReedSolomonCode implements ErasureCode {
     }
     GF.remainder(dataBuff, generatingPolynomial);
     for (int i = 0; i < paritySizeRS; i++) {
-      parity[paritySizeSRC+i] = dataBuff[i];
+      parity[paritySizeSRC + i] = dataBuff[i];
     }
     for (int i = 0; i < stripeSize; i++) {
       dataBuff[i + paritySizeRS] = message[i];
@@ -95,7 +97,7 @@ public class ReedSolomonCode implements ErasureCode {
     for (int i = 0; i < paritySizeSRC; i++) {
       parity[i] = 0;
       for (int f = 0; f < simpleParityDegree; f++) {
-        parity[i] = GF.add(dataBuff[i*simpleParityDegree+f], parity[i]);
+        parity[i] = GF.add(dataBuff[(i + 1)*simpleParityDegree + f], parity[i]);
       }
     }
   }
@@ -106,6 +108,7 @@ public class ReedSolomonCode implements ErasureCode {
     boolean[] isErased = new boolean[data.length];
     int erasureGroup = 0;
     int indexToUse = 0;
+
     if (erasedLocation.length == 0) {
         return;
     }
@@ -122,12 +125,16 @@ public class ReedSolomonCode implements ErasureCode {
     }
 
     // First see if you can fix the erasures using the simpleParities.
-    // This can be done only when the number of erasures <= paritySizeSRC
+    // This can be done only when the number of erasures <= paritySizeSRCFull
     boolean failed = false;
-    if(erasedLocation.length <= paritySizeSRC) {
+    if(erasedLocation.length <= paritySizeSRCFull) {
+      int dataCopy[] = new int[data.length];
+      for(int dataCopyIndex = 0; dataCopyIndex < data.length; dataCopyIndex++)
+        dataCopy[dataCopyIndex] = data[dataCopyIndex];
+
       for (int i = 0; i < erasedLocation.length; i++) {
         // Finds its XOR Group
-        if (erasedLocation[i] >= paritySizeSRC) {
+        if (erasedLocation[i] >= paritySizeSRC) { // in the inner code locations
           erasureGroup = (int) Math.ceil(
               ((float) (erasedLocation[i] - paritySizeSRC + 1))
               /
@@ -135,23 +142,41 @@ public class ReedSolomonCode implements ErasureCode {
               );
         }
         else
-          erasureGroup = erasedLocation[i] + 1;
+          erasureGroup = erasedLocation[i] + 2; //the missing SRC parity has erasure group 1
 
         // Now XOR them together. f = -1 to consider the simpleParity itself.
         for (int f = -1; f < simpleParityDegree; f++) {
-          if(f==-1)
-            indexToUse = erasureGroup - 1;
+          if(f == -1)
+            indexToUse = erasureGroup - 2;
           else
             indexToUse = (erasureGroup - 1) * simpleParityDegree +
                           f + paritySizeSRC;
-          if((indexToUse != erasedLocation[i]) && isErased[indexToUse]) {
+          if((
+              indexToUse >= 0) &&
+              (indexToUse != erasedLocation[i]) &&
+              isErased[indexToUse]
+                       ) {
             failed = true;
             break;
           }
-          erasedValue[i] = GF.add(erasedValue[i], data[indexToUse]);
+          int dataToUse = 0;
+          if(indexToUse >= 0)
+            dataToUse = dataCopy[indexToUse];
+          else {
+            for(int j = 0; j < paritySizeSRC; j++) {
+              if(!isErased[j])
+                dataToUse = GF.add(dataToUse, dataCopy[j]);
+              else {
+                failed = true;
+                break;
+              }
+            }
+          }
+          erasedValue[i] = GF.add(erasedValue[i], dataToUse);
         }
         if(failed)
           break;
+        dataCopy[erasedLocation[i]] = erasedValue[i];
         isErased[erasedLocation[i]] = false; //this index has been recovered.
       }
     }
@@ -190,7 +215,7 @@ public class ReedSolomonCode implements ErasureCode {
         // if it is an RS block erasure
         if (erasedLocation[i] >= paritySizeSRC) {
           errSignature[count] =
-            primitivePower[erasedLocation[i]-paritySizeSRC];
+            primitivePower[erasedLocation[i] - paritySizeSRC];
           erasedValueRS[count] =
             GF.substitute(dataRS, primitivePower[count]);
           count++;
@@ -201,7 +226,7 @@ public class ReedSolomonCode implements ErasureCode {
       count = 0;
       for (int j = 0; j < erasedLocation.length; j++) {
         if(erasedLocation[j] >= paritySizeSRC) {
-          dataRS[erasedLocation[j]-paritySizeSRC] = erasedValueRS[count];
+          dataRS[erasedLocation[j] - paritySizeSRC] = erasedValueRS[count];
           erasedValue[j] = erasedValueRS[count];
           count++;
         }
@@ -211,7 +236,11 @@ public class ReedSolomonCode implements ErasureCode {
     for (int i = 0; i < erasedLocation.length; i++) {
       if (erasedLocation[i] < paritySizeSRC) {
         for (int f = 0; f < simpleParityDegree; f++) {
-            erasedValue[i]  = GF.add(erasedValue[i], dataRS[erasedLocation[i]*simpleParityDegree+f]);
+            erasedValue[i]  =
+              GF.add(
+                  erasedValue[i],
+                  dataRS[(erasedLocation[i] + 1) * simpleParityDegree + f]
+                    );
         }
       }
     }
