@@ -19,7 +19,7 @@ run_datanode () {
   HADOOP_DATANODE_ARGS="\
     -D dfs.datanode.address=0.0.0.0:`expr 50010 + $DN` \
     -D dfs.datanode.http.address=0.0.0.0:`expr 50075 + $DN` \
-    -D dfs.datanode.ipc.address=0.0.0.0:`expr 50020 + $DN` \
+    -D dfs.datanode.ipc.address=0.0.0.0:`expr 50040 + $DN` \
     -D dfs.data.dir=/app/hadoop/tmp-$USER/dfs/data$DN"
   "$bin"/hadoop-daemon.sh $1 datanode $HADOOP_DATANODE_ARGS
 }

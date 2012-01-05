@@ -90,8 +90,8 @@ public class TestErasureCodes extends TestCase {
 
   public void testRSPerformance() {
     int stripeSize = 10;
-    int paritySizeRS = 4;
-    int paritySizeSRC = 0;
+    int paritySizeRS = 2;
+    int paritySizeSRC = 2;
     int paritySize = paritySizeRS + paritySizeSRC;
     ErasureCode ec = new ReedSolomonCode(stripeSize, paritySizeRS, paritySizeSRC);
     int symbolMax = (int) Math.pow(2, ec.symbolSize());
@@ -126,7 +126,7 @@ public class TestErasureCodes extends TestCase {
     int[] data = new int[paritySize + stripeSize];
     // The 0th symbol in the message is at paritySize
     // make sure the below indices work.
-    int[] erasedLocations = new int[]{paritySize, 0};//, 10};//, 5, 7};
+    int[] erasedLocations = new int[]{paritySize};//, 0};//, 10};//, 5, 7};
     int[] erasedValues = new int[erasedLocations.length];
     byte[] copy = new byte[bufsize];
     for (int j = 0; j < bufsize; j++) {
@@ -134,7 +134,7 @@ public class TestErasureCodes extends TestCase {
       message[0][j] = 0;
     }
 
-    for(int tests = 0; tests < 1; tests++) {
+    for(int tests = 0; tests < 5; tests++) {
     long decodeStart = System.currentTimeMillis();
     for (int i = 0; i < bufsize; i++) {
       // Copy parity first.

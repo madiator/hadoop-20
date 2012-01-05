@@ -358,15 +358,13 @@ public class ReedSolomonDecoder extends Decoder {
     int simpleParityDegree = -1;
     //TODO: fix the below about simpleParityDegree
     if(paritySizeSRC>0)
-      simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRC;
+      simpleParityDegree = (int)Math.ceil((float)(stripeSize + paritySizeRS)/(float)(paritySizeSRC+1));
 
-    int flagErased = 0;
-    int locationsLength = 0;
     double singleErasureGroup;
     LOG.info("blocksToFetch: doLightDecode is "+doLightDecode);
     LOG.info("erasedLocation "+convertArrayToString(erasedLocation));
 
-    if((!doLightDecode)||(paritySizeSRC==0)) {
+    if((!doLightDecode)||(paritySizeSRC==0)||(erasedLocation.length>1)) {
       for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
         locationsToFetch[i] = 1;
       }
@@ -383,48 +381,10 @@ public class ReedSolomonDecoder extends Decoder {
     for (int i = 0; i < paritySizeSRC + paritySizeRS + stripeSize; i++) {
       locationsToFetch[i] = 0;
     }
-    // First check if the is a single failure
-    if (erasedLocation.length == 1) {
-      // Find the simpleXOR group that the erased block is a member of
-      if (erasedLocation[0] >= paritySizeSRC) {
-        singleErasureGroup = Math.ceil(
-                            ((erasedLocation[0] - paritySizeSRC + 1)) /
-                            ((float)simpleParityDegree));
-       }
-      else{
-        singleErasureGroup = erasedLocation[0] + 1;
-      }
-      // Indicate the blocks that need to be communicated
-      for (int f = 0; f < simpleParityDegree; f++) {
-        // parityRS and stripe blocks
-        locationsToFetch[paritySizeSRC +
-                         ((int)singleErasureGroup - 1)
-                         * simpleParityDegree + f] = 1;
-      }
-      locationsToFetch[(int)singleErasureGroup - 1] = 1; 		//SimpleXOR block
-  		for (int i = 0; i<paritySizeSRC + paritySizeRS + stripeSize; i++){
-  			if (i == erasedLocation[0]) {
-  				locationsToFetch[i]=0;
-  			}
-  		}
+
+    int[][] blockMapper = reedSolomonCode[0].getLocationsToUse();
+    for(int i = 0; i < blockMapper[erasedLocation[0]].length; i++) {
+      locationsToFetch[blockMapper[erasedLocation[0]][i]] = 1;
     }
-  	else if (erasedLocation.length > 1){
-  	  for (int i = 0; i < stripeSize + paritySizeRS; i++) {
-  	    for (int j = 0; j < erasedLocation.length; j++){
-  	      if(erasedLocation[j] == paritySizeSRC + i){
-  					flagErased = 1;
-  				}
-  			}
-  			if (flagErased == 0) {
-  				locationsToFetch[paritySizeSRC + i] = 1;
-  				locationsLength++;
-  				if (locationsLength == stripeSize)
-  					return;
-  			}
-  			else {
-  				flagErased = 0;
-  			}
-  		}
-  	}
   }
 }

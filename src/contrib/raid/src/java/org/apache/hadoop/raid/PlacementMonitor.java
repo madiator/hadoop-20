@@ -28,8 +28,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
+import java.util.Map.Entry;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -62,7 +62,7 @@ public class PlacementMonitor {
   private volatile long lastUpdateFinishTime = 0L;
   private volatile long lastUpdateUsedTime = 0L;
   private final int maxCacheSize;
-  private Map<String, LocatedFileStatus> locatedFileStatusCache =
+  private final Map<String, LocatedFileStatus> locatedFileStatusCache =
       new LinkedHashMap<String, LocatedFileStatus>() {
         private static final long serialVersionUID = 1L;
         @Override
@@ -142,7 +142,7 @@ public class PlacementMonitor {
           getBlockInfos(srcFs, srcFile),
           getBlockInfos(parityFs, partFile, entry.startOffset, entry.length),
           code, srcFile, resolver);
-    } else { 
+    } else {
       // TODO: Move blocks in two clusters separately
       LOG.warn("Source and parity are in different file system. " +
           " source:" + srcFs.getUri() + " parity:" + parityFs.getUri() +
@@ -408,7 +408,7 @@ public class PlacementMonitor {
       Collections.sort(neighbors);
       for (Integer i : neighbors) {
         Long numBlocks = histo.get(i);
-        result += i + " co-localted blocks:" + numBlocks + "\n";
+        result += i + " co-located blocks:" + numBlocks + "\n";
       }
     }
     return result;

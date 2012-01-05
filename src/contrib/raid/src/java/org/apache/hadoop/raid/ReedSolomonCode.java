@@ -35,6 +35,7 @@ public class ReedSolomonCode implements ErasureCode {
   private final int[] errSignature;
   private final int[] paritySymbolLocations;
   private final int[] dataBuff;
+  private final int[][] locationsToUse;
 
   public ReedSolomonCode(int stripeSize, int paritySizeRS, int paritySizeSRC) {
     this.paritySizeRS = paritySizeRS;
@@ -45,7 +46,7 @@ public class ReedSolomonCode implements ErasureCode {
 
     if(paritySizeSRC>0) {
       paritySizeSRCFull = paritySizeSRC + 1;
-      simpleParityDegree = (stripeSize + paritySizeRS)/paritySizeSRCFull;
+      simpleParityDegree = (int)Math.ceil((float)(stripeSize + paritySizeRS)/(float)paritySizeSRCFull);
     }
     else {
       simpleParityDegree = -1;
@@ -75,6 +76,30 @@ public class ReedSolomonCode implements ErasureCode {
     }
     // generating polynomial has all generating roots
     generatingPolynomial = gen;
+
+    locationsToUse = new int[][]{
+        {6, 7, 8, 9, 10},
+        {11, 12, 13, 14, 15},
+
+        {0, 1, 3, 4, 5},
+        {0, 1, 2, 4, 5},
+        {0, 1, 2, 3, 5},
+        {0, 1, 2, 3, 4},
+
+        {0, 7, 8, 9, 10},
+        {0, 6, 8, 9, 10},
+        {0, 6, 7, 9, 10},
+        {0, 6, 7, 8, 10},
+        {0, 6, 7, 8, 9},
+
+        {1, 12, 13, 14, 15},
+        {1, 11, 13, 14, 15},
+        {1, 11, 12, 14, 15},
+        {1, 11, 12, 13, 15},
+        {1, 11, 12, 13, 14},
+        };
+
+
   }
 
   @Override
@@ -94,122 +119,55 @@ public class ReedSolomonCode implements ErasureCode {
     for (int i = 0; i < stripeSize; i++) {
       dataBuff[i + paritySizeRS] = message[i];
     }
-    for (int i = 0; i < paritySizeSRC; i++) {
+    /*for (int i = 0; i < paritySizeSRC; i++) {
       parity[i] = 0;
       for (int f = 0; f < simpleParityDegree; f++) {
         parity[i] = GF.add(dataBuff[(i + 1)*simpleParityDegree + f], parity[i]);
       }
+    }*/
+    for(int i = 0; i < paritySizeSRC; i++) {
+      parity[i] = 0;
+      for(int j = 0; j < simpleParityDegree; j++)
+        parity[i] = GF.add(dataBuff[simpleParityDegree*(i + 1) + j - 1], parity[i]);
     }
   }
 
+
   @Override
   public void decode(int[] data, int[] erasedLocation, int[] erasedValue) {
-
-    boolean[] isErased = new boolean[data.length];
-    int erasureGroup = 0;
-    int indexToUse = 0;
-
     if (erasedLocation.length == 0) {
-        return;
+      return;
     }
     assert(erasedLocation.length == erasedValue.length);
-
-    for (int i = 0; i < data.length; i++) {
-      isErased[i] = false;
-    }
-    //Make sure erased data and erased values are set to 0
+    //boolean isErased[] = new boolean[data.length];
     for (int i = 0; i < erasedLocation.length; i++) {
       data[erasedLocation[i]] = 0;
-      erasedValue[i] = 0;
-      isErased[erasedLocation[i]] = true;
+      //isErased[erasedLocation[i]] = true;
     }
 
-    // First see if you can fix the erasures using the simpleParities.
-    // This can be done only when the number of erasures <= paritySizeSRCFull
-    boolean failed = false;
-    if(erasedLocation.length <= paritySizeSRCFull) {
-      int dataCopy[] = new int[data.length];
-      for(int dataCopyIndex = 0; dataCopyIndex < data.length; dataCopyIndex++)
-        dataCopy[dataCopyIndex] = data[dataCopyIndex];
+    int sum = 0;
 
-      for (int i = 0; i < erasedLocation.length; i++) {
-        // Finds its XOR Group
-        if (erasedLocation[i] >= paritySizeSRC) { // in the inner code locations
-          erasureGroup = (int) Math.ceil(
-              ((float) (erasedLocation[i] - paritySizeSRC + 1))
-              /
-              ((float) simpleParityDegree)
-              );
-        }
-        else
-          erasureGroup = erasedLocation[i] + 2; //the missing SRC parity has erasure group 1
-
-        // Now XOR them together. f = -1 to consider the simpleParity itself.
-        for (int f = -1; f < simpleParityDegree; f++) {
-          if(f == -1)
-            indexToUse = erasureGroup - 2;
-          else
-            indexToUse = (erasureGroup - 1) * simpleParityDegree +
-                          f + paritySizeSRC;
-          if((
-              indexToUse >= 0) &&
-              (indexToUse != erasedLocation[i]) &&
-              isErased[indexToUse]
-                       ) {
-            failed = true;
-            break;
-          }
-          int dataToUse = 0;
-          if(indexToUse >= 0)
-            dataToUse = dataCopy[indexToUse];
-          else {
-            for(int j = 0; j < paritySizeSRC; j++) {
-              if(!isErased[j])
-                dataToUse = GF.add(dataToUse, dataCopy[j]);
-              else {
-                failed = true;
-                break;
-              }
-            }
-          }
-          erasedValue[i] = GF.add(erasedValue[i], dataToUse);
-        }
-        if(failed)
-          break;
-        dataCopy[erasedLocation[i]] = erasedValue[i];
-        isErased[erasedLocation[i]] = false; //this index has been recovered.
+    if(erasedLocation.length == 1) {
+      sum = 0;
+      for(int i = 0; i < 5; i++) {
+        sum = GF.add(sum, data[locationsToUse[erasedLocation[0]][i]]);
       }
+      erasedValue[0] = sum;
     }
-    else
-      failed = true;
-    // if the above didn't fail, then all erasures were fixed.
-    if(!failed)
-      return;
+    else {
+      // otherwise do RS decoding.
+      int[] dataRS = new int[paritySizeRS + stripeSize];
+      int[] erasedValueRS = new int[paritySizeRS];
+      int erasedLocationLengthRS = 0;
+      for (int i = 0; i < erasedLocation.length; i++) {
+        if (erasedLocation[i] >= paritySizeSRC)
+          erasedLocationLengthRS++;
+      }
+      //Create a copy of the RS data
+      for (int i = paritySizeSRC; i < data.length; i++) {
+        dataRS[i - paritySizeSRC] = data[i];
+      }
 
-    // otherwise do RS decoding.
-    int[] dataRS = new int[paritySizeRS + stripeSize];
-    int[] erasedValueRS = new int[paritySizeRS];
-    int erasedLocationLengthRS = 0;
-
-    //Create a copy of the RS data
-    for (int i = paritySizeSRC;
-             i < stripeSize + paritySizeRS + paritySizeSRC; i++) {
-      dataRS[i-paritySizeSRC] = data[i];
-    }
-    /*
-     * reset all erasedValues to zero.
-     * we could improve this by only reseting those values whose isErased values
-     * are true.
-     * Also count the number of RS erasures.
-     */
-
-    for (int i = 0; i < erasedLocation.length; i++) {
-      erasedValue[i] = 0;
-      //if it is an RS block erasure
-      if (erasedLocation[i] >= paritySizeSRC)
-        erasedLocationLengthRS++;
-    }
-    if (erasedLocationLengthRS >= 1) { //if there are RS failures
       int count = 0;
       for (int i = 0; i < erasedLocation.length; i++) {
         // if it is an RS block erasure
@@ -228,22 +186,29 @@ public class ReedSolomonCode implements ErasureCode {
         if(erasedLocation[j] >= paritySizeSRC) {
           dataRS[erasedLocation[j] - paritySizeSRC] = erasedValueRS[count];
           erasedValue[j] = erasedValueRS[count];
+          data[erasedLocation[j]] = erasedValueRS[count];
           count++;
         }
       }
-    }
-    // then check if there are any simpleXOR parities erased
-    for (int i = 0; i < erasedLocation.length; i++) {
-      if (erasedLocation[i] < paritySizeSRC) {
-        for (int f = 0; f < simpleParityDegree; f++) {
-            erasedValue[i]  =
-              GF.add(
-                  erasedValue[i],
-                  dataRS[(erasedLocation[i] + 1) * simpleParityDegree + f]
-                    );
+      // then check if there are any simpleXOR parities erased
+      for (int i = 0; i < erasedLocation.length; i++) {
+        if (erasedLocation[i] < paritySizeSRC) {
+          sum = 0;
+          for(int j = 0; j < 5; j++) {
+            sum = GF.add(sum, data[locationsToUse[erasedLocation[i]][j]]);
+          }
+          erasedValue[i] = sum;
         }
       }
     }
+  }
+
+  private void doRSDecode(int[] data, int[] erasedLocation, int[] erasedValue) {
+    for (int i = 0; i < erasedLocation.length; i++) {
+      errSignature[i] = primitivePower[erasedLocation[i]];
+      erasedValue[i] = GF.substitute(data, primitivePower[i]);
+    }
+    GF.solveVandermondeSystem(errSignature, erasedValue, erasedLocation.length);
   }
 
   @Override
@@ -334,5 +299,9 @@ public class ReedSolomonCode implements ErasureCode {
       }
     }
     return !corruptionFound;
+  }
+
+  public int[][] getLocationsToUse() {
+    return locationsToUse;
   }
 }

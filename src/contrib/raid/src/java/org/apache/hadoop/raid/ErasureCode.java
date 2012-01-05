@@ -57,4 +57,10 @@ public interface ErasureCode {
    * Number of bits for each symbol.
    */
   public int symbolSize();
+
+  /**
+   * Get the locations to use array, which maps for each lost block, which other blocks
+   * are to be XOR'd.
+   */
+  public int[][] getLocationsToUse();
 }
