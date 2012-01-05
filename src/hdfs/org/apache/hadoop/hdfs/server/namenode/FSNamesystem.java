@@ -17,71 +17,110 @@
  */
 package org.apache.hadoop.hdfs.server.namenode;
 
-import org.apache.commons.logging.*;
+import java.io.BufferedWriter;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.Formatter;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.Map.Entry;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import org.apache.hadoop.conf.*;
+import javax.management.NotCompliantMBeanException;
+import javax.management.ObjectName;
+import javax.management.StandardMBean;
+import javax.security.auth.login.LoginException;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.ReconfigurableBase;
+import org.apache.hadoop.conf.ReconfigurationException;
+import org.apache.hadoop.fs.ContentSummary;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.permission.FsAction;
+import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.fs.permission.PermissionStatus;
 import org.apache.hadoop.hdfs.DFSUtil;
-import org.apache.hadoop.hdfs.util.LightWeightHashSet;
-import org.apache.hadoop.hdfs.util.PathValidator;
-import org.apache.hadoop.hdfs.protocol.*;
+import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
+import org.apache.hadoop.hdfs.protocol.Block;
+import org.apache.hadoop.hdfs.protocol.BlockListAsLongs;
+import org.apache.hadoop.hdfs.protocol.ClientProtocol;
+import org.apache.hadoop.hdfs.protocol.DataTransferProtocol;
+import org.apache.hadoop.hdfs.protocol.DatanodeID;
+import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
+import org.apache.hadoop.hdfs.protocol.DirectoryListing;
+import org.apache.hadoop.hdfs.protocol.FSConstants;
+import org.apache.hadoop.hdfs.protocol.HdfsFileStatus;
+import org.apache.hadoop.hdfs.protocol.LocatedBlock;
+import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
+import org.apache.hadoop.hdfs.protocol.UnregisteredDatanodeException;
+import org.apache.hadoop.hdfs.protocol.VersionedLocatedBlock;
 import org.apache.hadoop.hdfs.server.common.GenerationStamp;
 import org.apache.hadoop.hdfs.server.common.HdfsConstants;
-import org.apache.hadoop.hdfs.server.common.HdfsConstants.StartupOption;
 import org.apache.hadoop.hdfs.server.common.Storage;
 import org.apache.hadoop.hdfs.server.common.UpgradeStatusReport;
+import org.apache.hadoop.hdfs.server.common.HdfsConstants.StartupOption;
 import org.apache.hadoop.hdfs.server.namenode.BlocksMap.BlockInfo;
 import org.apache.hadoop.hdfs.server.namenode.DatanodeDescriptor.DecommissioningStatus;
 import org.apache.hadoop.hdfs.server.namenode.DecommissionManager.Monitor;
-import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMBean;
-import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMetrics;
-import org.apache.hadoop.security.AccessControlException;
-import org.apache.hadoop.security.PermissionChecker;
-import org.apache.hadoop.security.UnixUserGroupInformation;
-import org.apache.hadoop.security.UserGroupInformation;
-import org.apache.hadoop.util.*;
-import org.apache.hadoop.metrics.util.MBeanUtil;
-import org.apache.hadoop.net.CachedDNSToSwitchMapping;
-import org.apache.hadoop.net.DNSToSwitchMapping;
-import org.apache.hadoop.net.NetworkTopology;
-import org.apache.hadoop.net.Node;
-import org.apache.hadoop.net.ScriptBasedMapping;
 import org.apache.hadoop.hdfs.server.namenode.LeaseManager.Lease;
 import org.apache.hadoop.hdfs.server.namenode.UnderReplicatedBlocks.BlockIterator;
+import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMBean;
+import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMetrics;
 import org.apache.hadoop.hdfs.server.protocol.BlockCommand;
 import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations;
-import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations.BlockWithLocations;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeCommand;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeRegistration;
 import org.apache.hadoop.hdfs.server.protocol.DisallowedDatanodeException;
 import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.ReceivedDeletedBlockInfo;
 import org.apache.hadoop.hdfs.server.protocol.UpgradeCommand;
+import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations.BlockWithLocations;
+import org.apache.hadoop.hdfs.util.LightWeightHashSet;
 import org.apache.hadoop.hdfs.util.LightWeightLinkedSet;
-import org.apache.hadoop.fs.ContentSummary;
-import org.apache.hadoop.fs.FileAlreadyExistsException;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.permission.*;
-import org.apache.hadoop.ipc.Server;
+import org.apache.hadoop.hdfs.util.PathValidator;
 import org.apache.hadoop.io.IOUtils;
-
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.DataOutputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.util.*;
-import java.util.Map.Entry;
-
-import javax.management.NotCompliantMBeanException;
-import javax.management.ObjectName;
-import javax.management.StandardMBean;
-import javax.security.auth.login.LoginException;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.apache.hadoop.ipc.Server;
+import org.apache.hadoop.metrics.util.MBeanUtil;
+import org.apache.hadoop.net.CachedDNSToSwitchMapping;
+import org.apache.hadoop.net.DNSToSwitchMapping;
+import org.apache.hadoop.net.NetworkTopology;
+import org.apache.hadoop.net.Node;
+import org.apache.hadoop.net.ScriptBasedMapping;
+import org.apache.hadoop.security.AccessControlException;
+import org.apache.hadoop.security.PermissionChecker;
+import org.apache.hadoop.security.UnixUserGroupInformation;
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.util.Daemon;
+import org.apache.hadoop.util.HostsFileReader;
+import org.apache.hadoop.util.ReflectionUtils;
+import org.apache.hadoop.util.Shell;
+import org.apache.hadoop.util.StringUtils;
+import org.apache.hadoop.util.VersionInfo;
 
 /**
  * ************************************************
@@ -111,6 +150,7 @@ public class FSNamesystem extends ReconfigurableBase
 
   private static final ThreadLocal<Formatter> auditFormatter =
     new ThreadLocal<Formatter>() {
+      @Override
       protected Formatter initialValue() {
         return new Formatter(new StringBuilder(AUDIT_FORMAT.length() * 4));
       }
@@ -118,6 +158,7 @@ public class FSNamesystem extends ReconfigurableBase
 
   private static final ThreadLocal<StringBuilder> auditStringBuilder =
     new ThreadLocal<StringBuilder>() {
+    @Override
     protected StringBuilder initialValue() {
       return new StringBuilder(AUDIT_FORMAT.length() * 4);
     }
@@ -218,7 +259,7 @@ public class FSNamesystem extends ReconfigurableBase
   // on the machine in question.
   // Mapping: StorageID -> ArrayList<Block>
   //
-  private Map<String, LightWeightHashSet<Block>> recentInvalidateSets =
+  private final Map<String, LightWeightHashSet<Block>> recentInvalidateSets =
     new TreeMap<String, LightWeightHashSet<Block>>();
 
   //
@@ -246,11 +287,11 @@ public class FSNamesystem extends ReconfigurableBase
   // We also store pending replication-orders.
   // Set of: Block
   //
-  private UnderReplicatedBlocks neededReplications = new UnderReplicatedBlocks();
+  private final UnderReplicatedBlocks neededReplications = new UnderReplicatedBlocks();
   private PendingReplicationBlocks pendingReplications;
 
   // list of blocks that need to be checked for possible overreplication
-  private LightWeightLinkedSet<Block> overReplicatedBlocks = new LightWeightLinkedSet<Block>();
+  private final LightWeightLinkedSet<Block> overReplicatedBlocks = new LightWeightLinkedSet<Block>();
 
   public LeaseManager leaseManager = new LeaseManager(this);
 
@@ -299,7 +340,7 @@ public class FSNamesystem extends ReconfigurableBase
   /**
    * Last block index used for replication work per priority
    */
-  private int[] replIndex = new int[UnderReplicatedBlocks.LEVEL];
+  private final int[] replIndex = new int[UnderReplicatedBlocks.LEVEL];
 
   /**
    * NameNode RPC address
@@ -307,7 +348,7 @@ public class FSNamesystem extends ReconfigurableBase
   private InetSocketAddress nameNodeAddress = null; // TODO: name-node has this field, it should be removed here
   private NameNode nameNode = null;
   private SafeModeInfo safeMode;  // safe mode information
-  private Host2NodesMap host2DataNodeMap = new Host2NodesMap();
+  private final Host2NodesMap host2DataNodeMap = new Host2NodesMap();
 
   // datanode networktoplogy
   NetworkTopology clusterMap = null;
@@ -576,7 +617,7 @@ public class FSNamesystem extends ReconfigurableBase
           + minReplication
           + " must be greater than 0");
     }
-    if (maxReplication >= (int) Short.MAX_VALUE) {
+    if (maxReplication >= Short.MAX_VALUE) {
       throw new IOException(
         "Unexpected configuration parameters: dfs.replication.max = "
           + maxReplication + " must be less than " + (Short.MAX_VALUE));
@@ -977,11 +1018,11 @@ public class FSNamesystem extends ReconfigurableBase
         Block block = locBlock.getBlock();
         int numNodes = blocksMap.numNodes(block);
         int numCorruptNodes = countNodes(block).corruptReplicas();
-        int numCorruptReplicas = corruptReplicas.numCorruptReplicas(block); 
+        int numCorruptReplicas = corruptReplicas.numCorruptReplicas(block);
 
         if (numCorruptNodes != numCorruptReplicas) {
-          LOG.warn("Inconsistent number of corrupt replicas for " + 
-                   block + "blockMap has " + numCorruptNodes + 
+          LOG.warn("Inconsistent number of corrupt replicas for " +
+                   block + "blockMap has " + numCorruptNodes +
                    " but corrupt replicas map has " + numCorruptReplicas);
         }
 
@@ -991,7 +1032,7 @@ public class FSNamesystem extends ReconfigurableBase
 
         if (numMachineSet > 0) {
           numNodes = 0;
-          for(Iterator<DatanodeDescriptor> it = blocksMap.nodeIterator(block); 
+          for(Iterator<DatanodeDescriptor> it = blocksMap.nodeIterator(block);
               it.hasNext();) {
             DatanodeDescriptor dn = it.next();
             boolean replicaCorrupt = corruptReplicas.isReplicaCorrupt(block, dn);
@@ -1130,7 +1171,7 @@ public class FSNamesystem extends ReconfigurableBase
   LocatedBlocks getBlockLocationsInternal(INodeFile inode,
       long offset, long length,
       int nrBlocksToReturn) throws IOException {
-    return getBlockLocationsInternal(inode, offset, length, 
+    return getBlockLocationsInternal(inode, offset, length,
         nrBlocksToReturn, false);
   }
 
@@ -1191,12 +1232,12 @@ public class FSNamesystem extends ReconfigurableBase
           blockCorrupt = false;
         } else {
           blockCorrupt = (numCorruptNodes == numNodes);
-          int numMachineSet = blockCorrupt ? numNodes : 
+          int numMachineSet = blockCorrupt ? numNodes :
                               (numNodes - numCorruptNodes);
           machineSet = new DatanodeDescriptor[numMachineSet];
           if (numMachineSet > 0) {
             numNodes = 0;
-            for(Iterator<DatanodeDescriptor> it = 
+            for(Iterator<DatanodeDescriptor> it =
                 blocksMap.nodeIterator(blocks[curBlk]); it.hasNext();) {
               DatanodeDescriptor dn = it.next();
               boolean replicaCorrupt = corruptReplicas.isReplicaCorrupt(blocks[curBlk], dn);
@@ -1225,7 +1266,7 @@ public class FSNamesystem extends ReconfigurableBase
    * before we start actual move.
    * @param target
    * @param srcs
-   * @param restricted - true if equal block sizes are to be enforced, 
+   * @param restricted - true if equal block sizes are to be enforced,
    *        false otherwise
    * @throws IOException
    */
@@ -1314,9 +1355,9 @@ public class FSNamesystem extends ReconfigurableBase
       boolean endSrc = false; // final src file doesn't have to have full end block
       for(int i=0; i<srcs.length; i++) {
         String src = srcs[i];
-        if(i==srcs.length-1)    
+        if(i==srcs.length-1)
           endSrc=true;
-        
+
         INodeFile srcInode = dir.getFileINode(src);
 
         if(src.isEmpty()
@@ -1337,9 +1378,9 @@ public class FSNamesystem extends ReconfigurableBase
         // verify that all the blocks are of the same length as target
         // should be enough to check the end blocks
         if (restricted) {
-          int idx = srcInode.blocks.length-1; 
-          if(endSrc)    
-            idx = srcInode.blocks.length-2; // end block of endSrc is OK not to be full   
+          int idx = srcInode.blocks.length-1;
+          if(endSrc)
+            idx = srcInode.blocks.length-2; // end block of endSrc is OK not to be full
           if(idx >= 0 && srcInode.blocks[idx].getNumBytes() != blockSize) {
             throw new IllegalArgumentException("concat: blocks sizes of " +
                 src + " and " + target + " should all be the same");
@@ -1621,7 +1662,7 @@ public class FSNamesystem extends ReconfigurableBase
       }
 
       try {
-        INode myFile = (INodeFile) inode;
+        INode myFile = inode;
         recoverLeaseInternal(myFile, src, holder, clientMachine, false, false);
 
         try {
@@ -1819,7 +1860,7 @@ public class FSNamesystem extends ReconfigurableBase
         " Please refer to dfs.support.append configuration parameter.");
     }
     startFileInternal(src, null, holder, clientMachine, false, true,
-      false, (short) maxReplication, (long) 0);
+      false, (short) maxReplication, 0);
     getEditLog().logSync();
 
     //
@@ -1969,7 +2010,7 @@ public class FSNamesystem extends ReconfigurableBase
    * are replicated.  Will return an empty 2-elt array if we want the
    * client to "try again later".
    */
-  public LocatedBlock getAdditionalBlock(String src, 
+  public LocatedBlock getAdditionalBlock(String src,
       String clientName,
       List<Node> excludedNodes, List<DatanodeInfo> favoredNodes,
       boolean wait, boolean needVersion)
@@ -2004,7 +2045,7 @@ public class FSNamesystem extends ReconfigurableBase
       fileLength = pendingFile.computeContentSummary().getLength();
       blockSize = pendingFile.getPreferredBlockSize();
       clientNode = pendingFile.getClientNode();
-      replication = (int) pendingFile.getReplication();
+      replication = pendingFile.getReplication();
     } finally {
       readUnlock();
     }
@@ -2024,7 +2065,7 @@ public class FSNamesystem extends ReconfigurableBase
       if (isInSafeMode()) {
         throw new SafeModeException("Cannot add block to " + src, safeMode);
       }
-      Arrays.fill((Object[])pathINodes, null);
+      Arrays.fill(pathINodes, null);
       dir.rootDir.getExistingPathINodes(components, pathINodes);
       INodeFileUnderConstruction pendingFile =
         checkLease(src, clientName, pathINodes[pathINodes.length - 1]);
@@ -2036,7 +2077,7 @@ public class FSNamesystem extends ReconfigurableBase
 
       // replicate last block if under-replicated
       replicateLastBlock(src, pendingFile);
-      
+
       // allocate new block record block locations in INode.
       newBlock = allocateBlock(src, pathINodes);
       pendingFile.setTargets(targets);
@@ -2072,7 +2113,7 @@ public class FSNamesystem extends ReconfigurableBase
     return new LocatedBlock(newBlock, targets, fileLength);
   }
 
-  /** 
+  /**
    * Check last block of the file under construction
    * Replicate it if it is under replicated
    * @param src the file name
@@ -2090,18 +2131,18 @@ public class FSNamesystem extends ReconfigurableBase
       pendingReplications.add(block, numOfTargets-totalReplicas);
     }
     int expectedReplicas = file.getReplication();
-    if (numOfTargets < expectedReplicas || 
+    if (numOfTargets < expectedReplicas ||
         status.decommissionedReplicas != 0 ||
         status.corruptReplicas != 0) {
-      LOG.info("Add " + block + " of " + src + " to needReplication queue: " + 
+      LOG.info("Add " + block + " of " + src + " to needReplication queue: " +
           " numOfTargets = " + numOfTargets +
           " decomissionedReplicas = " + status.decommissionedReplicas +
           " corruptReplicas = " + status.corruptReplicas);
-      neededReplications.add(block, status.liveReplicas, 
+      neededReplications.add(block, status.liveReplicas,
           status.decommissionedReplicas, expectedReplicas);
     }
   }
-  
+
   /**
    * The client would like to let go of the given block
    */
@@ -2215,7 +2256,7 @@ public class FSNamesystem extends ReconfigurableBase
       }
     }
   }
-  
+
   private CompleteFileStatus completeFileInternal(String src,
                                                   String holder)
     throws IOException {
@@ -2863,7 +2904,7 @@ public class FSNamesystem extends ReconfigurableBase
   }
 
   /**
-   * This is invoked when a lease expires. On lease expiry, 
+   * This is invoked when a lease expires. On lease expiry,
    * all the files that were written from that dfsclient should be
    * recovered.
    */
@@ -2990,7 +3031,7 @@ public class FSNamesystem extends ReconfigurableBase
     pendingFile.setClientName(newHolder);
     return leaseManager.reassignLease(lease, src, newHolder);
   }
-  
+
   private void finalizeINodeFileUnderConstruction(String src,
       INodeFileUnderConstruction pendingFile) throws IOException {
     finalizeINodeFileUnderConstruction(src, null, pendingFile);
@@ -3001,7 +3042,7 @@ public class FSNamesystem extends ReconfigurableBase
     // Put last block in needed replication queue if uder replicated
     replicateLastBlock(src, pendingFile);
 
-    NameNode.stateChangeLog.info("Removing lease on  file " + src + 
+    NameNode.stateChangeLog.info("Removing lease on  file " + src +
                                  " from client " + pendingFile.getClientName());
     leaseManager.removeLease(pendingFile.getClientName(), src);
 
@@ -3755,9 +3796,9 @@ public class FSNamesystem extends ReconfigurableBase
   }
 
   /** Decide the number of blocks to replicate on for this priority.
-   * The heuristic is that allocate at most 20% the quota for 
+   * The heuristic is that allocate at most 20% the quota for
    * lower priority blocks
-   * 
+   *
    * @param totalQuota max number of blocks can be replicated
    * @param blocksForThisPriority
    *                   number of needed replication blocks for this priority
@@ -3768,12 +3809,12 @@ public class FSNamesystem extends ReconfigurableBase
   private int getQuotaForThisPriority(int totalQuota, int blocksForThisPriority,
       int blocksForLowerPriorities) {
     // reserve at most 20% for lower priority blocks
-    int quotaForLowerPriorities = 
+    int quotaForLowerPriorities =
                      Math.min(totalQuota/5, blocksForLowerPriorities);
     return Math.min( blocksForThisPriority,
                      totalQuota-quotaForLowerPriorities);
   }
-  
+
   /**
    * Get a list of block lists to be replicated
    * The index of block lists represents the
@@ -4262,7 +4303,7 @@ public class FSNamesystem extends ReconfigurableBase
    */
   void heartbeatCheck() {
     if (isInSafeMode()) {
-      // not to check dead nodes if in safemode 
+      // not to check dead nodes if in safemode
       return;
     }
     boolean allAlive = false;
@@ -4310,9 +4351,9 @@ public class FSNamesystem extends ReconfigurableBase
       allAlive = !foundDead;
     }
   }
-  
-  public void processBlocksBeingWrittenReport(DatanodeID nodeID, 
-      BlockListAsLongs blocksBeingWritten) 
+
+  public void processBlocksBeingWrittenReport(DatanodeID nodeID,
+      BlockListAsLongs blocksBeingWritten)
   throws IOException {
     writeLock();
     try {
@@ -4321,12 +4362,12 @@ public class FSNamesystem extends ReconfigurableBase
         throw new IOException("ProcessReport from unregisterted node: "
             + nodeID.getName());
       }
-      
+
       Block block = new Block();
 
       for (int i = 0; i < blocksBeingWritten.getNumberOfBlocks(); i ++) {
-        block.set(blocksBeingWritten.getBlockId(i), 
-            blocksBeingWritten.getBlockLen(i), 
+        block.set(blocksBeingWritten.getBlockId(i),
+            blocksBeingWritten.getBlockLen(i),
             blocksBeingWritten.getBlockGenStamp(i));
 
         BlockInfo storedBlock = blocksMap.getStoredBlockWithoutMatchingGS(block);
@@ -4366,7 +4407,7 @@ public class FSNamesystem extends ReconfigurableBase
           continue;
         }
 
-        INodeFileUnderConstruction pendingFile = 
+        INodeFileUnderConstruction pendingFile =
                             (INodeFileUnderConstruction)inode;
         pendingFile.addTarget(dataNode);
         incrementSafeBlockCount(pendingFile.getTargets().length);
@@ -4375,7 +4416,7 @@ public class FSNamesystem extends ReconfigurableBase
       writeUnlock();
     }
   }
-  
+
   /**
    * The given node is reporting all its blocks.  Use this info to
    * update the (machine-->blocklist) and (block-->machinelist) tables.
@@ -4398,7 +4439,7 @@ public class FSNamesystem extends ReconfigurableBase
         throw new IOException("ProcessReport from dead or unregistered node: "
           + nodeID.getName());
       }
-      
+
       // To minimize startup time, we discard any second (or later) block reports
       // that we receive while still in startup phase.
       if (isInStartupSafeMode() && node.reportReceived()) {
@@ -4407,7 +4448,7 @@ public class FSNamesystem extends ReconfigurableBase
             + " because namenode still in startup phase");
         return;
       }
-      
+
       // check the case when the NN does not know of any replicas on this
       // datanode. This typically happens when the NN restarts and the first
       // report from this datanode is being processed. Short-circuit the
@@ -4425,7 +4466,7 @@ public class FSNamesystem extends ReconfigurableBase
             newReport.getBlockGenStamp(i));
           addStoredBlock(iblk, node, null);
         }
-        
+
         dnReporting++;
 
         if(isInSafeMode()) {
@@ -4560,7 +4601,7 @@ public class FSNamesystem extends ReconfigurableBase
 
     // add block to the data-node
     boolean added = node.addBlock(storedBlock);
-    
+
     // Is the block being reported the last block of an underconstruction file?
     boolean blockUnderConstruction = false;
     if (fileINode.isUnderConstruction()) {
@@ -4594,7 +4635,7 @@ public class FSNamesystem extends ReconfigurableBase
         if (cursize == 0) {
           storedBlock.setNumBytes(block.getNumBytes());
         } else if (cursize != block.getNumBytes()) {
-          String logMsg = "Inconsistent size for block " + block + 
+          String logMsg = "Inconsistent size for block " + block +
             " reported from " + node.getName() +
             " current size is " + cursize +
             " reported size is " + block.getNumBytes();
@@ -4711,7 +4752,7 @@ public class FSNamesystem extends ReconfigurableBase
     }
 
     //
-    // if file is being actively written to and it is the last block, 
+    // if file is being actively written to and it is the last block,
     // then do not check replication-factor here.
     //
     if (blockUnderConstruction && fileINode.isLastBlock(storedBlock)) {
@@ -5182,7 +5223,7 @@ public class FSNamesystem extends ReconfigurableBase
         if (DFSUtil.isDeleted(receivedAndDeletedBlocks[i])) {
           removeStoredBlock(receivedAndDeletedBlocks[i], node);
           // only leave received block in the array
-          receivedAndDeletedBlocks[i] = null; 
+          receivedAndDeletedBlocks[i] = null;
           deleted++;
         } else {
           blockReceived(receivedAndDeletedBlocks[i],
@@ -5212,10 +5253,10 @@ public class FSNamesystem extends ReconfigurableBase
           break;
         }
         Block blk = receivedAndDeletedBlocks[i];
-        if (blk == null) 
+        if (blk == null)
             continue;
         ++count;
-        if (blk.getNumBytes() != BlockCommand.NO_ACK) {       
+        if (blk.getNumBytes() != BlockCommand.NO_ACK) {
           NameNode.stateChangeLog.info("BLOCK* NameSystem.blockReceived: "
               + "blockMap updated: " + nodeReg.getName() + " is added to "
               + receivedAndDeletedBlocks[i] + " size "
@@ -5287,7 +5328,7 @@ public class FSNamesystem extends ReconfigurableBase
         }
         ReceivedDeletedBlockInfo blk = receivedAndDeletedBlocks[i];
         if ((blk != null) && !blk.isDeletedBlock()
-            && blk.getBlock().getNumBytes() != BlockCommand.NO_ACK) {       
+            && blk.getBlock().getNumBytes() != BlockCommand.NO_ACK) {
           NameNode.stateChangeLog.info("BLOCK* NameSystem.blockReceived: "
               + "blockMap updated: " + nodeReg.getName() + " is added to "
               + receivedAndDeletedBlocks[i].getBlock() + " size "
@@ -5301,7 +5342,7 @@ public class FSNamesystem extends ReconfigurableBase
       }
     }
   }
-  
+
   /**
    * Modify (block-->datanode) map.  Possibly generate
    * replication tasks, if the removed block is still valid.
@@ -5317,17 +5358,17 @@ public class FSNamesystem extends ReconfigurableBase
     }
 
     //
-    // if file is being actively written to and it is the last block, 
+    // if file is being actively written to and it is the last block,
     // then do not check replication-factor here.
     //
     BlockInfo storedBlock = blocksMap.getStoredBlock(block);
     INodeFile fileINode = storedBlock == null ? null : storedBlock.getINode();
-    if (fileINode != null && 
+    if (fileINode != null &&
         fileINode.isUnderConstruction() && fileINode.isLastBlock(storedBlock)
-        && !node.isDecommissionInProgress() && !node.isDecommissioned()) {          
+        && !node.isDecommissionInProgress() && !node.isDecommissioned()) {
       decrementSafeBlockCount(block);
       return;
-    }      
+    }
 
     //
     // It's possible that the block was removed because of a datanode
@@ -5349,7 +5390,7 @@ public class FSNamesystem extends ReconfigurableBase
     // Remove the replica from corruptReplicas
     corruptReplicas.removeFromCorruptReplicasMap(block, node);
   }
-  
+
   private void removeFromExcessReplicateMap(Block block, DatanodeDescriptor node){
     assert (hasWriteLock());
     Collection<Block> excessBlocks = excessReplicateMap.get(node.getStorageID());
@@ -5364,7 +5405,7 @@ public class FSNamesystem extends ReconfigurableBase
       }
     }
   }
-  
+
   private void removeFromExcessReplicateMap(Block block){
     assert (hasWriteLock());
     for (Iterator<DatanodeDescriptor> it =
@@ -5446,7 +5487,7 @@ public class FSNamesystem extends ReconfigurableBase
         return 100;
       }
 
-      return ((float) capacityUsed * 100.0f) / (float) capacityTotal;
+      return (capacityUsed * 100.0f) / capacityTotal;
     }
   }
 
@@ -5480,7 +5521,7 @@ public class FSNamesystem extends ReconfigurableBase
         return 0;
       }
 
-      return ((float) capacityRemaining * 100.0f) / (float) capacityTotal;
+      return (capacityRemaining * 100.0f) / capacityTotal;
     }
   }
 
@@ -5645,7 +5686,7 @@ public class FSNamesystem extends ReconfigurableBase
   private void startDecommission(DatanodeDescriptor node)
     throws IOException {
     if (!node.isDecommissionInProgress() && !node.isDecommissioned()) {
-      LOG.info("Start Decommissioning node " + node.getName() + " with " + 
+      LOG.info("Start Decommissioning node " + node.getName() + " with " +
           node.numBlocks() +  " blocks.");
       synchronized (heartbeats) {
         updateStats(node, false);
@@ -5657,7 +5698,7 @@ public class FSNamesystem extends ReconfigurableBase
       }
     }
   }
-  
+
   /**
    * Stop decommissioning the specified datanodes.
    */
@@ -5762,9 +5803,9 @@ public class FSNamesystem extends ReconfigurableBase
     int excessReplicas() {
       return excessReplicas;
     }
-    
+
     int getTotal() {
-      return liveReplicas + decommissionedReplicas + 
+      return liveReplicas + decommissionedReplicas +
              corruptReplicas + excessReplicas;
     }
   }
@@ -5981,7 +6022,7 @@ public class FSNamesystem extends ReconfigurableBase
 
   /**
    * Checks if the node is not on the hosts list.  If it is not, then
-   * it will be disallowed from registering.  
+   * it will be disallowed from registering.
    */
   private boolean verifyNodeRegistration(DatanodeRegistration nodeReg, String ipAddr)
     throws IOException {
@@ -6056,6 +6097,7 @@ public class FSNamesystem extends ReconfigurableBase
   }
 
   public DatanodeDescriptor getRandomDatanode() {
+    LOG.info("Fetching random data node, replicator class is "+getBlockPlacementPolicyClassName());
     return replicator.chooseTarget("", 1, null,
       new ArrayList<DatanodeDescriptor>(), 0)[0];
   }
@@ -6087,7 +6129,7 @@ public class FSNamesystem extends ReconfigurableBase
     /**
      * Safe mode threshold condition %.
      */
-    private double threshold;
+    private final double threshold;
     /**
      * Safe mode extension after the threshold.
      */
@@ -6095,9 +6137,9 @@ public class FSNamesystem extends ReconfigurableBase
     /**
      * Min replication required by safe mode.
      */
-    private int safeReplication;
+    private final int safeReplication;
     /** threshold for populating needed replication queues */
-    private double replQueueThreshold;
+    private final double replQueueThreshold;
 
     // internal fields
     /**
@@ -6335,7 +6377,7 @@ public class FSNamesystem extends ReconfigurableBase
     synchronized void setBlockTotal(int total) {
       this.blockTotal = total;
       this.blockReplQueueThreshold =
-        (int) (((double) blockTotal) * replQueueThreshold);
+        (int) ((blockTotal) * replQueueThreshold);
       checkMode();
     }
 
@@ -6346,7 +6388,7 @@ public class FSNamesystem extends ReconfigurableBase
      * @param replication current replication
      */
     synchronized void incrementSafeBlockCount(short replication) {
-      if ((int) replication == safeReplication) {
+      if (replication == safeReplication) {
         this.blockSafe++;
         checkMode();
       }
@@ -6431,6 +6473,7 @@ public class FSNamesystem extends ReconfigurableBase
     /**
      * Returns printable state of the class.
      */
+    @Override
     public String toString() {
       String resText = "Current safe block ratio = "
         + getSafeBlockRatio()
@@ -7092,7 +7135,7 @@ public class FSNamesystem extends ReconfigurableBase
   }
 
   /*
-   * @return list of datanodes where decommissioning is in progress 
+   * @return list of datanodes where decommissioning is in progress
    */
   public ArrayList<DatanodeDescriptor> getDecommissioningNodes() {
     readLock();
@@ -7128,6 +7171,7 @@ public class FSNamesystem extends ReconfigurableBase
       block = b;
     }
 
+    @Override
     public String toString() {
       return block.getBlockName() + "\t" + path;
     }
@@ -7165,7 +7209,7 @@ public class FSNamesystem extends ReconfigurableBase
   Collection<CorruptFileBlockInfo>
     listCorruptFileBlocks(String path,
                           String[] cookieTab,
-                          boolean decommissioningOnly) 
+                          boolean decommissioningOnly)
     throws IOException {
     readLock();
     synchronized (neededReplications) {
@@ -7178,7 +7222,7 @@ public class FSNamesystem extends ReconfigurableBase
         checkSuperuserPrivilege();
         // print a limited # of corrupt files per call
         int count = 0;
-        ArrayList<CorruptFileBlockInfo> corruptFiles = 
+        ArrayList<CorruptFileBlockInfo> corruptFiles =
           new ArrayList<CorruptFileBlockInfo>();
 
         BlockIterator blkIterator = null;
@@ -7187,7 +7231,7 @@ public class FSNamesystem extends ReconfigurableBase
         } else {
           blkIterator = getCorruptReplicaBlockIterator();
         }
-        
+
         if (cookieTab == null) {
           cookieTab = new String[] { null };
         }
@@ -7195,7 +7239,7 @@ public class FSNamesystem extends ReconfigurableBase
         for(int i = 0; i < skip && blkIterator.hasNext(); i++) {
           blkIterator.next();
         }
-        
+
         while (blkIterator.hasNext()) {
           Block blk = blkIterator.next();
           INode inode = blocksMap.getINode(blk);
@@ -7219,7 +7263,7 @@ public class FSNamesystem extends ReconfigurableBase
       }
     }
   }
-  
+
   public static int getIntCookie(String cookie){
     int c;
     if(cookie == null){
@@ -7392,15 +7436,15 @@ public class FSNamesystem extends ReconfigurableBase
 
   private static class ReplicationWork {
 
-    private Block block;
-    private INodeFile fileINode;
+    private final Block block;
+    private final INodeFile fileINode;
 
-    private int numOfReplicas;
-    private DatanodeDescriptor srcNode;
-    private List<DatanodeDescriptor> containingNodes;
+    private final int numOfReplicas;
+    private final DatanodeDescriptor srcNode;
+    private final List<DatanodeDescriptor> containingNodes;
 
     private DatanodeDescriptor targets[];
-    private int priority;
+    private final int priority;
 
     public ReplicationWork(Block block,
                             INodeFile fileINode,
