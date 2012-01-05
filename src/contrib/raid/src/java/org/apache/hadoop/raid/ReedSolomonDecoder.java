@@ -64,12 +64,53 @@ public class ReedSolomonDecoder extends Decoder {
       FileSystem fs, Path srcFile,
       FileSystem parityFs, Path parityFile,
        long blockSize, long errorOffset, long limit,
-       OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException {
+       OutputStream out, Progressable reporter, boolean doLightDecode)
+  throws IOException {
     FSDataInputStream[] inputs = new FSDataInputStream[stripeSize + paritySize];
     int[] erasedLocations = buildInputs(fs, srcFile, parityFs, parityFile,
                                         errorOffset, inputs, doLightDecode);
-    int blockIdxInStripe = ((int)(errorOffset/blockSize)) % stripeSize;
-    int erasedLocationToFix = paritySize + blockIdxInStripe;
+    int blockIdx = 0;
+    int erasedLocationToFix = 0;
+
+    blockIdx = ((int)(errorOffset/blockSize)) % stripeSize;
+    erasedLocationToFix = paritySize + blockIdx;
+
+    // Allows network reads to go on while decode is going on.
+    int boundedBufferCapacity = 2;
+    parallelDecoder = Executors.newFixedThreadPool(parallelism);
+    ParallelStreamReader parallelReader = new ParallelStreamReader(
+      reporter, inputs, bufSize, parallelism, boundedBufferCapacity, blockSize);
+    parallelReader.start();
+    decodeTime = 0;
+    waitTime = 0;
+    try {
+      writeFixedBlock(inputs, erasedLocations, erasedLocationToFix,
+                      limit, out, reporter, parallelReader, doLightDecode);
+    } finally {
+      // Inputs will be closed by parallelReader.shutdown().
+      parallelReader.shutdown();
+      LOG.info("Time spent in read " + parallelReader.readTime +
+        ", decode " + decodeTime + " wait " + waitTime);
+      parallelDecoder.shutdownNow();
+    }
+  }
+
+
+  @Override
+  protected void fixErasedParityBlockImpl(
+      FileSystem fs, Path srcFile,
+      FileSystem parityFs, Path parityFile,
+       long blockSize, long errorOffset, long limit,
+       OutputStream out, Progressable reporter, boolean doLightDecode)
+  throws IOException {
+    FSDataInputStream[] inputs = new FSDataInputStream[stripeSize + paritySize];
+    int[] erasedLocations = buildInputsForParity(fs, srcFile, parityFs, parityFile,
+                                        errorOffset, inputs, doLightDecode);
+    int blockIdx = 0;
+    int erasedLocationToFix = 0;
+
+    blockIdx = ((int)(errorOffset/blockSize)) % paritySize;
+    erasedLocationToFix = blockIdx;
 
     // Allows network reads to go on while decode is going on.
     int boundedBufferCapacity = 2;
@@ -101,15 +142,16 @@ public class ReedSolomonDecoder extends Decoder {
       FileStatus srcStat = fs.getFileStatus(srcFile);
       long blockSize = srcStat.getBlockSize();
       long blockIdx = (int)(errorOffset / blockSize);
+      ArrayList<Integer> erasedLocations = new ArrayList<Integer>();
+      //ArrayList<Integer> erasedLocationsLight = new ArrayList<Integer>();
+      int[] locationsToFetch = new int[paritySize + stripeSize];
+      for(int i = 0;i < paritySize + stripeSize; i++) {
+        locationsToFetch[i] = 0;
+      }
       long stripeIdx = blockIdx / stripeSize;
       LOG.info("FileSize = " + srcStat.getLen() + ", blockSize = " + blockSize +
                ", blockIdx = " + blockIdx + ", stripeIdx = " + stripeIdx);
-      ArrayList<Integer> erasedLocations = new ArrayList<Integer>();
-      //ArrayList<Integer> erasedLocationsLight = new ArrayList<Integer>();
-      int[] locationsToFetch = new int[paritySize+stripeSize];
-      for(int i=0;i<paritySize+stripeSize;i++) {
-    	  locationsToFetch[i] = 0;
-      }
+
 
   	  for (int i = paritySize; i < paritySize + stripeSize; i++) {
   		  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
@@ -178,6 +220,94 @@ public class ReedSolomonDecoder extends Decoder {
       throw e;
     }
 
+  }
+
+  protected int[] buildInputsForParity(FileSystem fs, Path srcFile,
+      FileSystem parityFs, Path parityFile,
+      long errorOffset, FSDataInputStream[] inputs,
+      boolean doLightDecode)
+  throws IOException {
+    LOG.info("Building inputs to recover block starting at " + errorOffset);
+    try {
+      FileStatus parityStat = parityFs.getFileStatus(parityFile);
+      long blockSize = parityStat.getBlockSize();
+      long blockIdx = (int)(errorOffset / blockSize);
+      ArrayList<Integer> erasedLocations = new ArrayList<Integer>();
+      int[] locationsToFetch = new int[paritySize + stripeSize];
+      for(int i = 0;i < paritySize + stripeSize; i++) {
+        locationsToFetch[i] = 0;
+      }
+      long parityIdx = blockIdx / paritySize;
+      LOG.info("FileSize = " + parityStat.getLen() + ", blockSize = " + blockSize +
+               ", blockIdx = " + blockIdx + ", stripeIdx = " + parityIdx);
+
+
+      for (int i = 0; i < paritySize; i++) {
+        long offset = blockSize * (parityIdx * paritySize + i);
+        if (offset == errorOffset) {
+            LOG.info(parityFile + ":" + offset +
+                " is known to have error, adding zeros as input " + i);
+            inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
+                offset + blockSize));
+            erasedLocations.add(i);
+        }
+      }
+      int[] erasedLocationsArray = new int[erasedLocations.size()];
+      for(int i = 0; i < erasedLocations.size(); i++) {
+        erasedLocationsArray[i] = erasedLocations.get(i);
+      }
+      blocksToFetch(erasedLocationsArray, locationsToFetch, doLightDecode);
+      LOG.info("locationsToFetch "+convertArrayToString(locationsToFetch));
+      for(int i = 0; i < locationsToFetch.length; i++) {
+        FSDataInputStream in;
+        if(i<paritySize) {
+          long offset = blockSize * (parityIdx * paritySize + i);
+          if(locationsToFetch[i]>0) {
+            in = parityFs.open(
+                    parityFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+            LOG.info("Adding " + parityFile + ":" + offset + " as input " + i);
+            in.seek(offset);
+              inputs[i] = in;
+          }
+          else {
+            inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
+                      offset + blockSize));
+
+            LOG.info("Adding zeros as input "+i+" for offset "+offset);
+          }
+        }
+        else {
+          long offset = blockSize * (parityIdx * stripeSize + i - paritySize);
+          if(locationsToFetch[i]>0) {
+            in = fs.open(
+                      srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+            LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
+            in.seek(offset);
+            inputs[i] = in;
+          }
+          else {
+            inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
+                      offset + blockSize));
+
+            LOG.info("Adding zeros as input "+i+" for offset "+offset);
+          }
+        }
+      }
+
+      if (erasedLocations.size() > paritySize) {
+        String msg = "Too many erased locations: " + erasedLocations.size();
+        LOG.error(msg);
+        throw new IOException(msg);
+      }
+      int[] locs = new int[erasedLocations.size()];
+      for (int i = 0; i < locs.length; i++) {
+        locs[i] = erasedLocations.get(i);
+      }
+      return locs;
+    } catch (IOException e) {
+      RaidUtils.closeStreams(inputs);
+      throw e;
+    }
   }
 
   public static String convertArrayToString(int[] array) {

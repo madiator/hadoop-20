@@ -227,10 +227,13 @@ abstract class BlockReconstructor extends Configured {
 
     // The lost file is a Simple Regenerating Code parity file
     if (isSRCParityFile(srcPath)) {
-      return processParityFile(
+      return processParityFileMahesh(
+          sourcePathFromParityPath(srcPath),
           srcPath,
-          new ReedSolomonEncoder(getConf(), stripeLength,
+          new ReedSolomonDecoder(getConf(), stripeLength,
               paritySizeRS, paritySizeSRC),
+          new ReedSolomonEncoder(getConf(), stripeLength,
+                  paritySizeRS, paritySizeSRC),
           progress);
     }
 
@@ -446,6 +449,94 @@ abstract class BlockReconstructor extends Configured {
 
         numBlocksReconstructed++;
       } finally {
+        localBlockFile.delete();
+      }
+      progress.progress();
+    }
+
+    LOG.info("Reconstructed " + numBlocksReconstructed + " blocks in " + parityPath);
+    return true;
+  }
+
+  boolean processParityFileMahesh(Path srcPath, Path parityPath,
+      Decoder decoder, Encoder encoder,
+      Progressable progress)
+  throws IOException {
+    LOG.info("Processing parity file " + parityPath);
+    if (srcPath == null) {
+      LOG.warn("Could not get regular file corresponding to parity file " +
+          parityPath + ", ignoring...");
+      return false;
+    }
+    DistributedFileSystem srcFs = getDFS(srcPath);
+    DistributedFileSystem parityFs = getDFS(parityPath);
+    FileStatus parityStat = parityFs.getFileStatus(parityPath);
+    long blockSize = parityStat.getBlockSize();
+    FileStatus srcStat = getDFS(srcPath).getFileStatus(srcPath);
+    long srcFileSize = srcStat.getLen();
+
+    // Check timestamp.
+    if (srcStat.getModificationTime() != parityStat.getModificationTime()) {
+      LOG.warn("Mismatching timestamp for " + srcPath + " and " + parityPath +
+          ", ignoring...");
+      return false;
+    }
+
+    String uriPath = parityPath.toUri().getPath();
+    int numBlocksReconstructed = 0;
+    List<LocatedBlock> lostBlocks =
+      lostBlocksInFile(parityFs, uriPath, parityStat);
+    if (lostBlocks.size() == 0) {
+      LOG.warn("Couldn't find any lost blocks in parity file " + parityPath +
+          ", ignoring...");
+      return false;
+    }
+    for (LocatedBlock lb: lostBlocks) {
+      Block lostBlock = lb.getBlock();
+      long lostBlockOffset = lb.getStartOffset();
+
+      LOG.info("Found lost block " + lostBlock +
+          ", offset " + lostBlockOffset);
+
+      final long blockContentsSize =
+        Math.min(blockSize, srcFileSize - lostBlockOffset);
+
+      File localBlockFile =
+        File.createTempFile(lostBlock.getBlockName(), ".tmp");
+      localBlockFile.deleteOnExit();
+      boolean doLightDecodeOptions[] = {true, false};
+
+      try {
+        for(boolean doLightDecode:doLightDecodeOptions) {
+          try {
+
+            if(doLightDecode) {
+              decoder.recoverParityBlockToFile(srcFs, srcPath, parityFs,
+                  parityPath, blockSize,
+                  lostBlockOffset, localBlockFile,
+                  blockContentsSize, progress, doLightDecode);
+            } else {
+              encoder.recoverParityBlockToFile(parityFs, srcPath, srcFileSize,
+                  blockSize, parityPath,
+                  lostBlockOffset, localBlockFile, progress);
+            }
+
+            // Now that we have recovered the parity file block locally, send it.
+            String datanode = chooseDatanode(lb.getLocations());
+            computeMetadataAndSendReconstructedBlock(
+                datanode, localBlockFile,
+                lostBlock, blockSize);
+
+            numBlocksReconstructed++;
+            LOG.info("In processFile, block reconstruction successful, numBlocksReconstructed = " +
+                ""+numBlocksReconstructed);
+            break; //If the block reconstruction was successful, break out of the loop
+          }catch(IOException e) {
+            // Light Decoder failed.
+            // So just use the encoder
+          }
+        }
+      }finally {
         localBlockFile.delete();
       }
       progress.progress();

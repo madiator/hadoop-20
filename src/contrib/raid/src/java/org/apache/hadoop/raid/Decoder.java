@@ -121,6 +121,17 @@ public abstract class Decoder {
     out.close();
   }
 
+  public void recoverParityBlockToFile(
+      FileSystem srcFs, Path srcPath, FileSystem parityFs, Path parityPath,
+      long blockSize, long blockOffset, File localBlockFile, long limit,
+      Progressable reporter, boolean doLightDecode)
+        throws IOException {
+      OutputStream out = new FileOutputStream(localBlockFile);
+      fixErasedParityBlock(srcFs, srcPath, parityFs, parityPath,
+                    blockSize, blockOffset, limit, out, reporter, doLightDecode);
+      out.close();
+    }
+
   /**
    * Wraps around fixErasedBlockImpl in order to configure buffers.
    * Having buffers of the right size is extremely important. If the the
@@ -145,6 +156,23 @@ public abstract class Decoder {
 	      blockSize, errorOffset, limit, out, reporter, false);
 	  }
 
+  void fixErasedParityBlock(
+      FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
+      long blockSize, long errorOffset, long limit,
+      OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException {
+    configureBuffers(blockSize);
+    fixErasedParityBlockImpl(fs, srcFile, parityFs, parityFile,
+      blockSize, errorOffset, limit, out, reporter, doLightDecode);
+  }
+  void fixErasedParityBlock(
+      FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
+      long blockSize, long errorOffset, long limit,
+      OutputStream out, Progressable reporter) throws IOException {
+    configureBuffers(blockSize);
+    fixErasedParityBlockImpl(fs, srcFile, parityFs, parityFile,
+      blockSize, errorOffset, limit, out, reporter, false);
+  }
+
   /**
    * Implementation-specific mechanism of writing a fixed block.
    * @param fs The filesystem containing the source file.
@@ -163,6 +191,11 @@ public abstract class Decoder {
    * @param doLightDecode If true, carry out light decoding (fast decoding).
    */
   protected abstract void fixErasedBlockImpl(
+      FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
+      long blockSize, long errorOffset, long limit,
+      OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException;
+
+  protected abstract void fixErasedParityBlockImpl(
       FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
       long blockSize, long errorOffset, long limit,
       OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException;
