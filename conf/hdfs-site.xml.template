@@ -117,7 +117,7 @@ seconds.</description>
 
 <property>
   <name>dfs.block.size</name>
-  <value>4194304</value>
+  <value>67108864</value>
   <description>The default block size for new files.</description>
 </property>
 
