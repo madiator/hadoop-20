@@ -18,16 +18,15 @@
 
 package org.apache.hadoop.raid;
 
-import java.io.OutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
+import java.io.OutputStream;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.Progressable;
 
@@ -97,7 +96,7 @@ public class XORDecoder extends Decoder {
           throw readEx;
         }
 
-        int toWrite = (int)Math.min((long)bufSize, limit - written);
+        int toWrite = (int)Math.min(bufSize, limit - written);
 
         XOREncoder.xor(readResult.readBufs, writeBufs[0]);
 
@@ -123,6 +122,14 @@ public class XORDecoder extends Decoder {
   protected long parityOffset(long errorOffset, long blockSize) {
     long stripeIdx = errorOffset / (blockSize * stripeSize);
     return stripeIdx * blockSize;
+  }
+
+  @Override
+  protected void fixErasedParityBlockImpl(
+      FileSystem fs, Path srcFile, FileSystem parityFs, Path parityFile,
+      long blockSize, long errorOffset, long limit,
+      OutputStream out, Progressable reporter, boolean doLightDecode) throws IOException {
+
   }
 
 }
