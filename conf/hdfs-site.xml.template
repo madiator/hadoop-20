@@ -14,13 +14,13 @@
 
 <property>
   <name>dfs.blockreport.intervalMsec</name>
-  <value>3000</value>
+  <value>30000</value>
   <description>How long before each datanode reports about the blocks it has in ms</description>
 </property>
 
 <property>
   <name>dfs.replication</name>
-  <value>3</value>
+  <value>1</value>
 </property>
 
 <property>
@@ -43,7 +43,7 @@
   
 <property>
   <name>raid.policy.rescan.interval</name>
-  <value>1000</value>
+  <value>10000</value>
   <description>Specify the periodicity in milliseconds after which
   all source paths are rescanned and parity blocks recomputed if
   necessary. By default, this value is 1 hour.
@@ -103,16 +103,16 @@
 
 <property>
   <name>dfs.heartbeat.interval</name>
-  <value>1</value>
+  <value>3</value>
   <description>Determines datanode heartbeat interval in
 seconds.</description>
 </property>
 
 <property>
   <name>heartbeat.recheck.interval</name>
-  <value>60</value>
-  <description>Determines datanode heartbeat interval in
-seconds.</description>
+  <value>15000</value>
+  <description>Heartbeat recheck interval in ms. The data node expire interval is 
+10*dfs.heartbeat.interval + 2*heartbeat.recheck.interval</description>
 </property>
 
 <property>

@@ -347,8 +347,8 @@ public class ReedSolomonDecoder extends Decoder {
       if (decoded.length != erasedLocations.length) {
         decoded = new int[erasedLocations.length];
       }
-      LOG.info("in writeFixedBlock, " +
-      		"erasedLocations after readFromInputs = "+convertArrayToString(erasedLocations));
+      //LOG.info("in writeFixedBlock, " +
+      //		"erasedLocations after readFromInputs = "+convertArrayToString(erasedLocations));
       int toWrite = (int)Math.min(bufSize, limit - written);
 
       int partSize = (int) Math.ceil(bufSize * 1.0 / parallelism);
