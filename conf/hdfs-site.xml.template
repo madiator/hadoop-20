@@ -43,7 +43,7 @@
   
 <property>
   <name>raid.policy.rescan.interval</name>
-  <value>10000</value>
+  <value>60000</value>
   <description>Specify the periodicity in milliseconds after which
   all source paths are rescanned and parity blocks recomputed if
   necessary. By default, this value is 1 hour.
@@ -97,7 +97,7 @@
   
 <property>
   <name>raid.blockfix.interval</name>
-  <value>1000</value>
+  <value>30000</value>
   <description>interval in milliseconds between checks for lost files. Default is 1 minute</description>
 </property>
 
