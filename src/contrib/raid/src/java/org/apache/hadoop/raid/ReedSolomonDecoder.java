@@ -152,7 +152,7 @@ public class ReedSolomonDecoder extends Decoder {
       LOG.info("FileSize = " + srcStat.getLen() + ", blockSize = " + blockSize +
                ", blockIdx = " + blockIdx + ", stripeIdx = " + stripeIdx);
 
-
+      // first find the error location
   	  for (int i = paritySize; i < paritySize + stripeSize; i++) {
   		  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
   		  if (offset == errorOffset) {
@@ -163,15 +163,19 @@ public class ReedSolomonDecoder extends Decoder {
 	          erasedLocations.add(i);
   		  }
   	  }
+  	  // find the blocks to fetch
   	  int[] erasedLocationsArray = new int[erasedLocations.size()];
   	  for(int i = 0; i < erasedLocations.size(); i++) {
   		  erasedLocationsArray[i] = erasedLocations.get(i);
   	  }
   	  blocksToFetch(erasedLocationsArray, locationsToFetch, doLightDecode);
   	  LOG.info("locationsToFetch "+convertArrayToString(locationsToFetch));
+
+  	  // fetch them all
   	  for(int i = 0; i < locationsToFetch.length; i++) {
   		  FSDataInputStream in;
   		  if(i<paritySize) {
+  		    // fetch the parity blocks
   			  long offset = blockSize * (stripeIdx * paritySize + i);
   			  if(locationsToFetch[i]>0) {
     			  in = parityFs.open(
@@ -188,13 +192,21 @@ public class ReedSolomonDecoder extends Decoder {
   			  }
   		  }
   		  else {
+  		    // fetch the data blocks, but make sure not to fetch past file size
   			  long offset = blockSize * (stripeIdx * stripeSize + i - paritySize);
-  			  if(locationsToFetch[i]>0) {
-    			  in = fs.open(
-    			            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
-    			  LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
-    			  in.seek(offset);
-        		inputs[i] = in;
+  			  if (locationsToFetch[i]>0)  {
+  			    if (offset <= srcStat.getLen()) {
+      			  in = fs.open(
+      			            srcFile, conf.getInt("io.file.buffer.size", 64 * 1024));
+      			  LOG.info("Adding " + srcFile + ":" + offset + " as input " + i);
+      			  in.seek(offset);
+          		inputs[i] = in;
+  			    } else {
+  			      LOG.info(srcFile + ":" + offset +
+                  " is past file size, adding zeros as input " + i);
+  			      inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
+                  offset + blockSize));
+  			    }
   			  }
   			  else {
   				  inputs[i] = new FSDataInputStream(new RaidUtils.ZeroInputStream(
