@@ -119,12 +119,6 @@ public class ReedSolomonCode implements ErasureCode {
     for (int i = 0; i < stripeSize; i++) {
       dataBuff[i + paritySizeRS] = message[i];
     }
-    /*for (int i = 0; i < paritySizeSRC; i++) {
-      parity[i] = 0;
-      for (int f = 0; f < simpleParityDegree; f++) {
-        parity[i] = GF.add(dataBuff[(i + 1)*simpleParityDegree + f], parity[i]);
-      }
-    }*/
     for(int i = 0; i < paritySizeSRC; i++) {
       parity[i] = 0;
       for(int j = 0; j < simpleParityDegree; j++)
