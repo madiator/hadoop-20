@@ -163,8 +163,10 @@ abstract class BlockReconstructor extends Configured {
 
     // The lost file is a ReedSolomon parity file
     if (isRsParityFile(srcPath)) {
-      return processParityFile(
+      return processParityFileMahesh(
+	  sourcePathFromParityPath(srcPath),
           srcPath,
+	  rsDecoder,
           rsEncoder,
           progress);
     }
