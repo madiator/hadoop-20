@@ -190,7 +190,7 @@ public class Codec {
         json, "tmp_parity_dir", "/tmp" + this.parityDirectory);
     this.tmpHarDirectory = getJSONString(
         json, "tmp_har_dir", "/tmp" + this.parityDirectory + "_har");
-    this.simulateBlockFix = json.getBoolean("simulate_block_fix"); 
+    this.simulateBlockFix = json.getBoolean("simulate_block_fix");
     checkDirectory(parityDirectory);
     checkDirectory(tmpParityDirectory);
     checkDirectory(tmpHarDirectory);
