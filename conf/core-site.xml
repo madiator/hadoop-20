@@ -13,7 +13,7 @@
 
 <property>  
     <name>hadoop.tmp.dir</name>  
-    <value>/app/hadoop/tmp</value>  
+    <value>/app/hadoop/tmp-hduser</value>  
     <description>A base for other temporary directories.</description>  
 </property>  
 

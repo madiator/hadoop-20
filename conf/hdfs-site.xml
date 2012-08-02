@@ -28,11 +28,23 @@
     <description>Check for superuser privileges?</description>  
 </property>  
 
+<property>
+  <name>fs.hdfs.impl</name>
+  <value>org.apache.hadoop.hdfs.DistributedFileSystem</value>
+  <description>The FileSystem for hdfs: uris.</description>
+</property>
+
 <property>  
     <name>raid.policy.rescan.interval</name>  
-    <value>30000</value>  
+    <value>60000</value>  
     <description>interval in milliseconds between checks for lost files. Default is 1 minute</description>  
 </property> 
+
+<property>
+  <name>dfs.blockreport.intervalMsec</name>
+  <value>20000</value>
+  <description>How long before each datanode reports about the blocks it has in ms</description>
+</property>
 
 <property>
   <name>raid.codecs.json</name>
@@ -68,7 +80,7 @@
         "priority"      : 200,
         "description"   : "SimpleRegeneratingCode code",
         "simulate_block_fix" : false        
-      },  
+      },
     ]   
   </value>
   <description>JSon string that contains all Raid codecs</description>
@@ -76,7 +88,7 @@
 
 <property>
     <name>raid.classname</name>
-    <value>org.apache.hadoop.raid.LocalRaidNode</value>
+    <value>org.apache.hadoop.raid.DistRaidNode</value>
     <description>Specify which implementation of RaidNode to use
       (class name).
     </description>
@@ -84,7 +96,7 @@
   
   <property>
     <name>raid.blockfix.classname</name>
-    <value>org.apache.hadoop.raid.LocalBlockIntegrityMonitor</value>
+    <value>org.apache.hadoop.raid.DistBlockIntegrityMonitor</value>
     <description>Specify the BlockFixer implementation to use.
       The default is org.apache.hadoop.raid.DistBlockFixer.
     </description>
@@ -104,5 +116,17 @@ seconds.</description>
 10*dfs.heartbeat.interval + 2*heartbeat.recheck.interval</description>
 </property>
 
+<property>
+  <name>dfs.block.replicator.classname</name>
+  <value>org.apache.hadoop.hdfs.server.namenode.BlockPlacementPolicyRaid</value>
+  <description>Placement policy</description>
+</property>
+
+
+<property>
+  <name>raid.blockfix.interval</name>
+  <value>10000</value>
+  <description>interval in milliseconds between checks for lost files. Default is 1 minute</description>
+</property>
 
 </configuration>

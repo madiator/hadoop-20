@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import org.mortbay.log.Log;
+
 public abstract class ErasureCode {
   /**
    * Encodes the given message.
@@ -54,6 +56,9 @@ public abstract class ErasureCode {
   public abstract void decode(int[] data, int[] erasedLocations,
       int[] erasedValues);
 
+  public abstract void decode(int[] data, int[] erasedLocations,
+	      int[] erasedValues, int[] locationsToRead, int[] locationsNotToRead);
+  
   /**
    * Figure out which locations need to be read to decode erased locations. The
    * locations are specified as integers in the range [ 0, stripeSize() +
@@ -131,7 +136,8 @@ public abstract class ErasureCode {
   }
 
   public void decodeBulk(byte[][] readBufs, byte[][] writeBufs,
-      int[] erasedLocations) {
+      int[] erasedLocations, int[] locationsToRead, int[] locationsNotToRead) {
+	    
     int[] tmpInput = new int[readBufs.length];
     int[] tmpOutput = new int[erasedLocations.length];
 
@@ -143,10 +149,12 @@ public abstract class ErasureCode {
       for (int i = 0; i < tmpInput.length; i++) {
         tmpInput[i] = readBufs[i][idx] & 0x000000FF;
       }
-      decode(tmpInput, erasedLocations, tmpOutput);
+      decode(tmpInput, erasedLocations, tmpOutput, locationsToRead, locationsNotToRead);
       for (int i = 0; i < tmpOutput.length; i++) {
         writeBufs[i][idx] = (byte) tmpOutput[i];
       }
     }
   }
+  
+  
 }

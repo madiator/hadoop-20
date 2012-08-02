@@ -28,7 +28,11 @@ export HADOOP_NAMENODE_OPTS="-Dcom.sun.management.jmxremote.port=8998 -Dcom.sun.
 
 # The only user who can start hadoop daemons. 
 # If this is not set, any user can start hadoop daemons.  
-export HADOOP_USERNAME="mahesh"
+export HADOOP_USERNAME="hduser"
+
+
+export JAVA_HOME=/usr/lib/jvm/java-6-sun
+export HADOOP_CLASSPATH=${HADOOP_HOME}/build/contrib/raid/hadoop-0.20-fbjun2012-raid.jar
 
 # Java Runtime garbage collection options to pass to all Hadoop
 # servers (Namenode, Jobtracker, Datanode, Tasktracker). This must end

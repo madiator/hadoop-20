@@ -20,6 +20,7 @@
 # resolve links - $0 may be a softlink
 
 this="$0"
+
 while [ -h "$this" ]; do
   ls=`ls -ld "$this"`
   link=`expr "$ls" : '.*-> \(.*\)$'`

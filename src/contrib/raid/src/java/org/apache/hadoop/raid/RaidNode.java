@@ -1378,8 +1378,11 @@ public abstract class RaidNode implements RaidProtocol {
       if (!RaidNode.class.isAssignableFrom(raidNodeClass)) {
         throw new ClassNotFoundException("not an implementation of RaidNode");
       }
+      LOG.info("1. raidNodeClass is "+raidNodeClass.getName());
+      LOG.info("2. raidNodeClass is "+raidNodeClass);
       Constructor<?> constructor =
           raidNodeClass.getConstructor(new Class[] {Configuration.class} );
+      LOG.info("3. Got constructor "+constructor.getName());
       return (RaidNode) constructor.newInstance(conf);
     } catch (NoSuchMethodException e) {
       throw new ClassNotFoundException("cannot construct raidnode", e);

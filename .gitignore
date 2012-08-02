@@ -16,4 +16,4 @@ src/docs/cn/uming.conf
 junit*.properties
 nohup.out
 *.patch
-
+scripts
