@@ -19,8 +19,8 @@
 package org.apache.hadoop.raid;
 
 import java.util.Set;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+
+import com.sun.org.apache.commons.logging.LogFactory;
 
 public class ReedSolomonCode extends ErasureCode {
   public static final Log LOG = LogFactory.getLog(ReedSolomonCode.class);
@@ -47,8 +47,8 @@ public class ReedSolomonCode extends ErasureCode {
   public void init(Codec codec) {
     init(codec.stripeLength, codec.parityLength);
     LOG.info("Initialized " + ReedSolomonCode.class +
-             " stripeLength:" + codec.stripeLength +
-             " parityLength:" + codec.parityLength);
+        " stripeLength:" + codec.stripeLength +
+        " parityLength:" + codec.parityLength);
   }
 
   private void init(int stripeSize, int paritySize) {
@@ -94,51 +94,51 @@ public class ReedSolomonCode extends ErasureCode {
     }
   }
 
-  
+
   @Override
   public void decode(int[] data, int[] erasedLocations, int[] erasedValues) {
-	  
-	  if (erasedLocations.length == 0) {
-		  return;
-	  }
-	  assert(erasedLocations.length == erasedValues.length);
-	  for (int i = 0; i < erasedLocations.length; i++) {
-		  data[erasedLocations[i]] = 0;
-	  }
-	  for (int i = 0; i < erasedLocations.length; i++) {
-		  errSignature[i] = primitivePower[erasedLocations[i]];
-	      erasedValues[i] = GF.substitute(data, primitivePower[i]);
-	  }
-	  GF.solveVandermondeSystem(errSignature, erasedValues,
-			  erasedLocations.length);
+    if (erasedLocations.length == 0) {
+      return;
+    }
+    assert(erasedLocations.length == erasedValues.length);
+    for (int i = 0; i < erasedLocations.length; i++) {
+      data[erasedLocations[i]] = 0;
+    }
+    for (int i = 0; i < erasedLocations.length; i++) {
+      errSignature[i] = primitivePower[erasedLocations[i]];
+      erasedValues[i] = GF.substitute(data, primitivePower[i]);
+    }
+    GF.solveVandermondeSystem(errSignature, erasedValues,
+        erasedLocations.length);
   }
 
-  public void decode(int[] data, int[] erasedLocation, int[] erasedValue, 
-		  int[] locationsToRead, int[] locationsNotToRead) {
-	  
-	  /*
-	   * Pretend that all locations in locationsNotToRead are
-	   * erased and try to repair them.
-	   */
-	  int[] recovValue = new int[locationsNotToRead.length];
+  @Override
+  public void decode(int[] data, int[] erasedLocation, int[] erasedValue,
+      int[] locationsToRead, int[] locationsNotToRead) {
 
-	  decode(data, locationsNotToRead, recovValue);
-	  
-	  /*
-	   * Among the recovered values corresponding to locationsNotToRead
-	   * copy those corresponding to erasedLocation into erasedValue.
-	   */
-	  for (int i=0; i < erasedLocation.length; i++) {
-		  for (int j=0; j < locationsNotToRead.length; j++) {
-			  if (erasedLocation[i] == locationsNotToRead[j]) {
-				  erasedValue[i] = recovValue[j];
-				  break;
-			  }
-		  }
-	  }
+    /*
+     * Pretend that all locations in locationsNotToRead are
+     * erased and try to repair them.
+     */
+    int[] recovValue = new int[locationsNotToRead.length];
+
+    decode(data, locationsNotToRead, recovValue);
+
+    /*
+     * Among the recovered values corresponding to locationsNotToRead
+     * copy those corresponding to erasedLocation into erasedValue.
+     */
+    for (int i=0; i < erasedLocation.length; i++) {
+      for (int j=0; j < locationsNotToRead.length; j++) {
+        if (erasedLocation[i] == locationsNotToRead[j]) {
+          erasedValue[i] = recovValue[j];
+          break;
+        }
+      }
+    }
   }
-  
-  
+
+
   @Override
   public int stripeSize() {
     return this.stripeSize;
