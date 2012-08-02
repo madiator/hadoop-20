@@ -79,7 +79,7 @@ public class TestSessionDriver extends TestCase {
                                      new InetAddress(TstUtils.getNodeHost(i),
                                                      TstUtils.getNodePort(i)),
                                      TstUtils.std_spec);
-      nodes[i].setUsed(TstUtils.free_spec);
+      nodes[i].setFree(TstUtils.std_spec);
       nodes[i].setResourceInfos(resourceInfos);
     }
     for (int i=0; i<numNodes; i++) {
@@ -249,7 +249,7 @@ public class TestSessionDriver extends TestCase {
       driver.requestResources(rlist.subList(0, 400));
 
       // these requests will timeout immediately
-      TestClusterManager.reliableSleep(100);
+      TestClusterManager.reliableSleep(500);
 
       if (driver.getFailed() == null)
         assertEquals("CM failure not detected", null);

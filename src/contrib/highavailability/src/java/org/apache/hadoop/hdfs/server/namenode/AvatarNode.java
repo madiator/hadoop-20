@@ -144,6 +144,7 @@ public class AvatarNode extends NameNode
   private static final String EDITSFILE     = "/current/edits";
   private static final String EDITSNEW     = "/current/edits.new";
   private static final String TIMEFILE     = "/current/fstime";
+  private static final String IMAGEFILE = "/current/fsimage";
   private static final String IMAGENEW     ="/current/fsimage.ckpt";
   public static final long TXID_IGNORE = -1;
   public static final String FAILOVER_SNAPSHOT_FILE = "failover_snapshot_file";
@@ -639,6 +640,7 @@ public class AvatarNode extends NameNode
   protected void stopRPC(boolean interruptClientHadlers) throws IOException {
     try {
       super.stopRPC(interruptClientHadlers);
+      LOG.info("stopRPC: Stopping avatardatanode server");
       this.server.stop(interruptClientHadlers);
       this.server.waitForHandlers();
     } catch (InterruptedException ex) {
@@ -654,7 +656,6 @@ public class AvatarNode extends NameNode
         String address = getClusterAddress(this.startupConf);
         long sessionId = zk.getPrimarySsId(address);
         ZookeeperTxId zkTxId = zk.getPrimaryLastTxId(address);
-        long zkLastTxId = zkTxId.getTransactionId();
         if (sessionId != zkTxId.getSessionId()) {
           throw new IOException("Session Id in the ssid node : " + sessionId
               + " does not match the session Id in the txid node : "
@@ -831,7 +832,16 @@ public class AvatarNode extends NameNode
   /**
    * @inheritDoc
    */
+  @Override
   public synchronized void setAvatar(Avatar avatar) throws IOException {
+    setAvatar(avatar, false);
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public synchronized void setAvatar(Avatar avatar, boolean force)
+      throws IOException {
     if (avatar == currentAvatar) {
       LOG.info("Failover: Trying to change avatar to " + avatar +
                " but am already in that state.");
@@ -864,8 +874,16 @@ public class AvatarNode extends NameNode
         throw new IOException(msg);
       }
 
-      ZookeeperTxId zkTxId = getLastTransactionId();
-      standby.quiesce(zkTxId.getTransactionId());
+      InjectionHandler
+          .processEvent(InjectionEvent.AVATARNODE_AFTER_STALE_CHECKPOINT_CHECK);
+
+      ZookeeperTxId zkTxId = null;
+      if (!force) {
+        zkTxId = getLastTransactionId();
+        standby.quiesce(zkTxId.getTransactionId());
+      } else {
+        standby.quiesce(TXID_IGNORE);
+      }
       cleaner.stop();
       cleanerThread.interrupt();
       try {
@@ -874,8 +892,11 @@ public class AvatarNode extends NameNode
         Thread.currentThread().interrupt();
       }
 
-      verifyTransactionIds(zkTxId);
-      String oldPrimaryFsck = verifyFailoverTestData();
+      String oldPrimaryFsck = null;
+      if (!force) {
+        verifyTransactionIds(zkTxId);
+        oldPrimaryFsck = verifyFailoverTestData();
+      }
 
       // change the value to the one for the primary
       int maxStandbyBufferedTransactions = confg.getInt(
@@ -892,7 +913,7 @@ public class AvatarNode extends NameNode
 
       sessionId = writeSessionIdToZK(this.startupConf);
       LOG.info("Failover: Changed avatar from " + currentAvatar + " to " + avatar);
-      if (enableTestFramework && enableTestFrameworkFsck) {        
+      if (enableTestFramework && enableTestFrameworkFsck && !force) {
         if (!failoverFsck.equals(oldPrimaryFsck)) {
           LOG.warn("Failover: FSCK on old primary and new primary do not match");
           LOG.info("----- FSCK ----- OLD BEGIN");
@@ -1975,7 +1996,38 @@ public class AvatarNode extends NameNode
     }
     return new File(edit + EDITSFILE);
   }
-  
+
+  /**
+   * Return the image file of the remote NameNode
+   */
+  File getRemoteImageFile(Configuration conf) throws IOException {
+    String image = null;
+    if (instance == InstanceId.NODEZERO) {
+      image = conf.get("dfs.name.dir.shared1");
+    } else if (instance == InstanceId.NODEONE) {
+      image = conf.get("dfs.name.dir.shared0");
+    } else {
+      LOG.info("Instance is invalid. " + instance);
+      throw new IOException("Instance is invalid. " + instance);
+    }
+    return new File(image + IMAGEFILE);
+  }
+
+  /**
+   * Returns the image file used by this avatar, note that this might not
+   * necessarily be the local image file but it would be the image file
+   * for this Avatar. For example if this is the one instance it could return
+   * the image file under the NFS /one directory, but that is fine since that
+   * image belongs to the one instance.
+   */
+  File getAvatarImageFile(Configuration conf) throws IOException {
+    File[] images = getFSImage().getImageFiles();
+    if (images == null || images.length == 0) {
+      throw new IOException("No image files found for this Avatar");
+    }
+    return images[0];
+  }
+
   /**
    * Return the edits.new file of the remote NameNode
    */
@@ -2213,10 +2265,14 @@ public class AvatarNode extends NameNode
       if (currentAvatar == Avatar.STANDBY) {
         map.put(new NameNodeKey("Standby: ignore datanodes",
             NameNodeKey.STANDBY), toStr(this.ignoreDatanodes()));
+        map.put(new NameNodeKey("Standby: ingest state", NameNodeKey.STANDBY),
+            toStr((standby == null) ? "" : standby.currentIngestState));
         map.put(new NameNodeKey("Standby: ingest fell behind", NameNodeKey.STANDBY),
-            toStr(this.standby.fellBehind()));
+            toStr((standby == null) ? "" : standby.fellBehind()));
         map.put(new NameNodeKey("Standby: ingest lag bytes", NameNodeKey.STANDBY),
             toStr((standby == null) ? 0L : standby.getLagBytes()));
+        map.put(new NameNodeKey("Standby: checkpoint status", NameNodeKey.STANDBY),
+            toStr((standby == null) ? "" : standby.getCheckpointStatus()));
         map.put(new NameNodeKey("Standby: failover in progress",
             NameNodeKey.STANDBY), toStr(standbySafeMode.failoverInProgress()));
         if (standbySafeMode.failoverInProgress()) {

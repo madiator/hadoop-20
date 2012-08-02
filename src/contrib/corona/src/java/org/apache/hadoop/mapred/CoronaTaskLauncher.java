@@ -89,11 +89,12 @@ public class CoronaTaskLauncher {
     for (Map.Entry<String, InetAddress> entry : allTrackers.entrySet()) {
       String trackerName = entry.getKey();
       InetAddress addr = entry.getValue();
-      LOG.info("Sending kill job to " + trackerName + "(" + addr.host + ":" +
-          addr.port + ")");
+      String description = "KillJobAction " + jobId;
       ActionToSend action = new ActionToSend(trackerName, addr,
-          new KillJobAction(jobId));
+          new KillJobAction(jobId), description);
       workers[workerId].enqueueAction(action);
+      LOG.info("Queueing "  + description + " to worker " + workerId + " " +
+        trackerName + "(" + addr.host + ":" + addr.port + ")");
       workerId = (workerId + 1) % workers.length;
     }
   }
@@ -108,8 +109,11 @@ public class CoronaTaskLauncher {
       String trackerName, InetAddress addr, List<KillTaskAction> killActions) {
     for (KillTaskAction killAction : killActions) {
       int workerId = workerIdForTask(killAction.getTaskID());
+      String description = "KillTaskAction " + killAction.getTaskID();
+      LOG.info("Queueing " + description + " to worker " + workerId + " " +
+        trackerName + "(" + addr.host + ":" + addr.port + ")");
       workers[workerId].enqueueAction(
-          new ActionToSend(trackerName, addr, killAction));
+          new ActionToSend(trackerName, addr, killAction, description));
     }
   }
 
@@ -122,8 +126,11 @@ public class CoronaTaskLauncher {
   public void commitTask(
       String trackerName, InetAddress addr, CommitTaskAction action) {
     int workerId = workerIdForTask(action.getTaskID());
+    String description = "KillTaskAction " + action.getTaskID();
+    LOG.info("Queueing " + description + " to worker " + workerId + " " +
+      trackerName + "(" + addr.host + ":" + addr.port + ")");
     workers[workerId].enqueueAction(new ActionToSend(
-        trackerName, addr, action));
+        trackerName, addr, action, description));
   }
 
   /**
@@ -144,14 +151,15 @@ public class CoronaTaskLauncher {
    * @param addr The address of the tracker to send the task to.
    */
   public void launchTask(Task task, String trackerName, InetAddress addr) {
-    LOG.info("Queueing a launch task action for " + trackerName + "(" +
-        addr.host + ":" + addr.port + ")");
     CoronaSessionInfo info = new CoronaSessionInfo(
       coronaJT.getSessionId(), coronaJT.getJobTrackerAddress());
     LaunchTaskAction action = new LaunchTaskAction(task, info);
+    String description = "LaunchTaskAction " + action.getTask().getTaskID();
     ActionToSend actionToSend =
-        new ActionToSend(trackerName, addr, action);
+        new ActionToSend(trackerName, addr, action, description);
     int workerId = workerIdForTask(task.getTaskID());
+    LOG.info("Queueing " + description +  " to worker " + workerId + " " +
+      trackerName + "(" + addr.host + ":" + addr.port + ")");
     workers[workerId].enqueueAction(actionToSend);
   }
 
@@ -167,6 +175,8 @@ public class CoronaTaskLauncher {
     private final int port;
     /** The action to send. */
     private final TaskTrackerAction ttAction;
+    /** Description for logging. */
+    private final String description;
     /** Action creation time */
     private final long ctime = System.currentTimeMillis();
 
@@ -176,11 +186,12 @@ public class CoronaTaskLauncher {
      * @param action The action to send.
      */
     private ActionToSend(String trackerName, InetAddress addr,
-        TaskTrackerAction action) {
+        TaskTrackerAction action, String description) {
       this.trackerName = trackerName;
       this.trackerHost = addr.host;
       this.port = addr.port;
       this.ttAction = action;
+      this.description = description;
     }
   }
 
@@ -230,23 +241,11 @@ public class CoronaTaskLauncher {
       }
 
       for (ActionToSend actionToSend : actions) {
-        // Get the tracker address.
-        InetSocketAddress trackerRpcAddress =
-            new InetSocketAddress(actionToSend.trackerHost, actionToSend.port);
-
         String trackerName = actionToSend.trackerName;
         if (coronaJT.getTrackerStats().isFaulty(trackerName)) {
-          if (actionToSend.ttAction instanceof LaunchTaskAction) {
-            LaunchTaskAction lta = (LaunchTaskAction) actionToSend.ttAction;
-            LOG.info("Not sending LaunchTaskAction(" +
-              lta.getTask().getTaskID() + ") to " +
-              trackerRpcAddress + " since previous communication " +
-              " failed");
-          } else {
-            LOG.info("Not sending " + actionToSend.ttAction.getClass() + " to " +
-                trackerRpcAddress + " since previous communication " +
-                " failed");
-          }
+          LOG.warn("Not sending " + actionToSend.description +  " to " +
+            actionToSend.trackerHost + ":" + actionToSend.port +
+                " since previous communication failed");
           coronaJT.processTaskLaunchError(actionToSend.ttAction);
           continue;
         }
@@ -256,6 +255,9 @@ public class CoronaTaskLauncher {
             coronaJT.getSessionId(), coronaJT.getJobTrackerAddress());
         actionToSend.ttAction.setExtensible(info);
 
+        // Get the tracker address.
+        String trackerRpcAddress =
+          actionToSend.trackerHost + ":" + actionToSend.port;
         try {
           // Start the timer on the task just before making the connection
           // and RPC. If there are any errors after this point, we will reuse
@@ -264,26 +266,20 @@ public class CoronaTaskLauncher {
             LaunchTaskAction lta = (LaunchTaskAction) actionToSend.ttAction;
             expireTasks.addNewTask(lta.getTask().getTaskID());
           }
-          CoronaTaskTrackerProtocol client =
-              coronaJT.getTaskTrackerClient(trackerRpcAddress);
+          CoronaTaskTrackerProtocol client = coronaJT.getTaskTrackerClient(
+            actionToSend.trackerHost, actionToSend.port);
           client.submitActions(new TaskTrackerAction[]{actionToSend.ttAction});
         } catch (IOException e) {
-          if (actionToSend.ttAction instanceof LaunchTaskAction) {
-            LaunchTaskAction lta = (LaunchTaskAction) actionToSend.ttAction;
-            LOG.error("Could not send LaunchTaskAction(" +
-              lta.getTask().getTaskID() + ") to " +
-              trackerRpcAddress, e);
-          } else {
-            LOG.error("Could not send " + actionToSend.ttAction.getClass() +
-                " action to " + trackerRpcAddress, e);
-          }
-          coronaJT.resetTaskTrackerClient(trackerRpcAddress);
+          LOG.error("Could not send " + actionToSend.description +
+                " to " + trackerRpcAddress, e);
+          coronaJT.resetTaskTrackerClient(
+            actionToSend.trackerHost, actionToSend.port);
           coronaJT.getTrackerStats().recordConnectionError(trackerName);
           coronaJT.processTaskLaunchError(actionToSend.ttAction);
         }
         // Time To Send
         long TTS = System.currentTimeMillis() - actionToSend.ctime;
-        LOG.info("Processed action " + actionToSend.ttAction.getClass() + " for " +
+        LOG.info("Processed " + actionToSend.description + " for " +
             actionToSend.trackerName + " " + TTS + " msec after its creation.");
       }
     }
@@ -323,12 +319,18 @@ public class CoronaTaskLauncher {
   } // Worker
 
   /**
-   * Get the worker ID for a task.
-   * @param taskId The task.
+   * Get the worker ID for a task attempt.
+   * We have this function so that all actions for a task attempt go to a
+   * single thread. But actions for different attempts of the same task will
+   * go to different threads. This is good when a thread gets stuck and the
+   * next attempt of the task can go to another thread.
+   * @param attemptID The task attempt.
    * @return The ID.
    */
   @SuppressWarnings("deprecation")
-  private int workerIdForTask(TaskAttemptID taskId) {
-    return taskId.getTaskID().getId() % workers.length;
+  private int workerIdForTask(TaskAttemptID attemptID) {
+    int taskNum = attemptID.getTaskID().getId();
+    int attemptNum = attemptID.getId();
+    return (taskNum + attemptNum)  % workers.length;
   }
 }

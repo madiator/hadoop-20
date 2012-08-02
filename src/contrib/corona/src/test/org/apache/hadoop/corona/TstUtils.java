@@ -21,13 +21,14 @@ public class TstUtils {
     new HashMap<Integer, String>();
 
   public static ComputeSpecs std_spec;
+  public static ComputeSpecs nothing_free_spec;
   static {
     std_spec = new ComputeSpecs(numCpuPerNode);
     std_spec.setNetworkMBps((short)100);
     std_spec.setMemoryMB(1024);
     std_spec.setDiskGB(1024);
+    nothing_free_spec = new ComputeSpecs();
   }
-  public static ComputeSpecs free_spec = new ComputeSpecs();
   public static String std_cpu_to_resource_partitioning =
       "{\"1\":{\"MAP\":1, \"REDUCE\":1, \"JOBTRACKER\":1}}";
 
@@ -91,7 +92,7 @@ public class TstUtils {
   }
 
   public static String startSession(ClusterManager cm, SessionInfo info)
-    throws IOException, TException, InvalidSessionHandle {
+    throws IOException, TException, InvalidSessionHandle, SafeModeException {
     String handle = cm.getNextSessionId();
     cm.sessionStart(handle, info);
     return handle;

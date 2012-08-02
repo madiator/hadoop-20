@@ -19,12 +19,15 @@ package org.apache.hadoop.raid;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hdfs.DFSClient;
 import org.apache.hadoop.raid.protocol.PolicyInfo;
 import org.apache.hadoop.util.StringUtils;
@@ -34,18 +37,20 @@ import org.apache.hadoop.util.StringUtils;
  */
 public class Statistics implements Serializable {
 
-  final private String codecId;
-  final private int parityLength;
-  final private int stripeLength;
-  private long estimatedParitySize = 0L;
-  private long estimatedDoneParitySize = 0L;
-  private long estimatedDoneSourceSize = 0L;
+  final protected String codecId;
+  final protected Codec codec;
+  final protected int parityLength;
+  final protected int stripeLength;
+  protected long estimatedParitySize = 0L;
+  protected long estimatedDoneParitySize = 0L;
+  protected long estimatedDoneSourceSize = 0L;
 
-  private Map<RaidState, Counters> stateToSourceCounters;
-  private Counters parityCounters;
-  private Map<Integer, Counters> numBlocksToRaidedCounters;
+  protected Map<RaidState, Counters> stateToSourceCounters;
+  protected Counters parityCounters;
+  protected Map<Integer, Counters> numBlocksToRaidedCounters;
 
   public Statistics(Codec codec, Configuration conf) {
+    this.codec = codec;
     this.codecId = codec.id;
     this.stripeLength = codec.stripeLength;
     this.parityLength = codec.parityLength;
@@ -59,6 +64,7 @@ public class Statistics implements Serializable {
   }
 
   public static class Counters implements Serializable {
+    private long numDirs = 0L;
     private long numFiles = 0L;
     private long numBlocks = 0L;
     private long numBytes = 0L;
@@ -69,6 +75,22 @@ public class Statistics implements Serializable {
       numBlocks += computeNumBlocks(status);
       numLogical += status.getLen();
       numBytes += status.getLen() * status.getReplication();
+    }
+    
+    /**
+     * Increment counters for directory
+     * @param lfs List of FileStatus for files under the direcotry
+     */
+    protected void inc(List<FileStatus> lfs) {
+      numDirs += 1;
+      numFiles += lfs.size();
+      numBlocks += DirectoryStripeReader.getBlockNum(lfs);
+      numLogical += DirectoryStripeReader.getDirLogicalSize(lfs);
+      numBytes += DirectoryStripeReader.getDirPhysicalSize(lfs);
+    }
+    
+    public long getNumDirs() {
+      return numDirs;
     }
 
     public long getNumFiles() {
@@ -92,7 +114,8 @@ public class Statistics implements Serializable {
         return false;
       }
       Counters counters = (Counters) obj;
-      return (numFiles == counters.numFiles &&
+      return (numDirs == counters.numDirs &&
+              numFiles == counters.numFiles &&
               numBlocks == counters.numBlocks &&
               numBytes == counters.numBytes &&
               numLogical == counters.numLogical);
@@ -100,6 +123,7 @@ public class Statistics implements Serializable {
     @Override
     public int hashCode() {
       int hash = 7;
+      hash = 37 * hash + (int) (numDirs ^ (numDirs >>> 32));
       hash = 37 * hash + (int) (numFiles ^ (numFiles >>> 32));
       hash = 37 * hash + (int) (numBlocks ^ (numBlocks >>> 32));
       hash = 37 * hash + (int) (numBytes ^ (numBytes >>> 32));
@@ -108,17 +132,21 @@ public class Statistics implements Serializable {
     }
     @Override
     public String toString() {
-      return "files:" + numFiles + " blocks:" + numBlocks +
-          " bytes:" + numBytes + " logical:" + numLogical;
+      return "dirs: " + numDirs + " files:" + numFiles + " blocks:"
+          + numBlocks + " bytes:" + numBytes + " logical:" + numLogical;
     }
-    public String htmlRow() {
-      return td(StringUtils.humanReadableInt(numFiles)) +
+    public String htmlRow(Codec codec) {
+      String dirColumn = !codec.isDirRaid? "": 
+        td(StringUtils.humanReadableInt(numDirs));
+      return dirColumn + td(StringUtils.humanReadableInt(numFiles)) +
              td(StringUtils.humanReadableInt(numBlocks)) +
              td(StringUtils.byteDesc(numBytes)) +
              td(StringUtils.byteDesc(numLogical));
     }
-    public static String htmlRowHeader() {
-      return td("Files") + td("Blocks") +
+    public static String htmlRowHeader(Codec codec) {
+      String dirHeader = !codec.isDirRaid? "":
+        td("Dirs");
+      return dirHeader + td("Files") + td("Blocks") +
         td("Bytes") + td("Logical");
     }
   }
@@ -127,7 +155,7 @@ public class Statistics implements Serializable {
    * Collect the statistics of a source file. Return true if the file should be
    * raided but not.
    */
-  public boolean addSourceFile(PolicyInfo info, FileStatus src,
+  public boolean addSourceFile(FileSystem fs, PolicyInfo info, FileStatus src,
       RaidState.Checker checker, long now, int targetReplication)
       throws IOException {
     RaidState state = checker.check(info, src, now, true);
@@ -169,11 +197,11 @@ public class Statistics implements Serializable {
       (long)Math.ceil(((double)numBlocks) / stripeLength) * parityLength;
     return parityBlocks * targetReplication * src.getBlockSize();
   }
-
+  
   private static int computeNumBlocks(FileStatus status) {
     return (int)Math.ceil(((double)(status.getLen())) / status.getBlockSize());
   }
-
+  
   public Counters getSourceCounters(RaidState state) {
     return stateToSourceCounters.get(state);
   }
@@ -296,12 +324,12 @@ public class Statistics implements Serializable {
         RaidState.NOT_RAIDED_TOO_SMALL, RaidState.NOT_RAIDED_BUT_SHOULD};
 
     StringBuilder sb = new StringBuilder();
-    sb.append(tr(td("STATE") + Counters.htmlRowHeader()));
+    sb.append(tr(td("STATE") + Counters.htmlRowHeader(codec)));
     for (RaidState state : statesToShow) {
       Counters counters = stateToSourceCounters.get(state);
-      sb.append(tr(td(state.toString()) + counters.htmlRow()));
+      sb.append(tr(td(state.toString()) + counters.htmlRow(codec)));
     }
-    sb.append(tr(td("PARITY") + parityCounters.htmlRow()));
+    sb.append(tr(td("PARITY") + parityCounters.htmlRow(codec)));
     return table(sb.toString());
   }
 

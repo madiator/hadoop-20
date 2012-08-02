@@ -224,8 +224,19 @@ public class RemoteJTProxy implements InterCoronaJobTrackerProtocol,
           return consumed;
         }
       };
-    resourceTracker.processAvailableGrants(proc, 1);
-    return grants.get(0);
+    while (true) {
+      // Try to get JT grant while periodically checking for session driver
+      // exceptions.
+      long timeout = 60 * 1000; // 1 min.
+      resourceTracker.processAvailableGrants(proc, 1, timeout);
+      IOException e = sessionDriver.getFailed();
+      if (e != null) {
+        throw e;
+      }
+      if (!grants.isEmpty()) {
+        return grants.get(0);
+      }
+    }
   }
 
   /**
@@ -243,8 +254,7 @@ public class RemoteJTProxy implements InterCoronaJobTrackerProtocol,
       Utilities.appInfoToAddress(grant.appInfo);
     CoronaTaskTrackerProtocol coronaTT = null;
     try {
-      coronaTT = jt.getTaskTrackerClient(
-        new InetSocketAddress(ttAddr.getHost(), ttAddr.getPort()));
+      coronaTT = jt.getTaskTrackerClient(ttAddr.getHost(), ttAddr.getPort());
     } catch (IOException e) {
       LOG.error("Error while trying to connect to TT at " + ttAddr.getHost() +
         ":" + ttAddr.getPort(), e);
@@ -491,6 +501,14 @@ public class RemoteJTProxy implements InterCoronaJobTrackerProtocol,
         "getQueueAclsForCurrentUser not supported by proxy.");
   }
 
+  public void close() {
+    synchronized (this) {
+      if (client != null) {
+        RPC.stopProxy(client);
+      }
+    }
+  }
+
   /**
    * Generic caller interface.
    */
@@ -526,7 +544,7 @@ public class RemoteJTProxy implements InterCoronaJobTrackerProtocol,
    */
   private void handleCallFailure() throws IOException {
     try {
-      jt.close(false);
+      jt.close(false, true);
     } catch (InterruptedException e) {
       throw new IOException(e);
     }

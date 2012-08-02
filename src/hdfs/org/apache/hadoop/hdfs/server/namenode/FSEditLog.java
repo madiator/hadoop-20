@@ -833,7 +833,7 @@ public class FSEditLog {
     if(failedSd)
       fsimage.incrementCheckpointTime();  // update time for the valid ones
   }
-
+  
   /**
    * Removes the old edit log and renamed edits.new as edits.
    * Reopens the edits file.
@@ -854,6 +854,7 @@ public class FSEditLog {
     for (Iterator<StorageDirectory> it = 
            fsimage.dirIterator(NameNodeDirType.EDITS); it.hasNext();) {
       StorageDirectory sd = it.next();
+
       if (!getEditNewFile(sd).renameTo(getEditFile(sd))) {
         //
         // renameTo() fails on Windows if the destination
@@ -1024,4 +1025,5 @@ public class FSEditLog {
     sb.append(opCounts);
     FSImage.LOG.debug(sb.toString());
   }
+
 }

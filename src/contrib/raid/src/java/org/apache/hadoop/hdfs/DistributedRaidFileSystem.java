@@ -17,19 +17,12 @@
  */
 package org.apache.hadoop.hdfs;
 
-import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.net.URI;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Random;
-import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockMissingException;
@@ -38,21 +31,15 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FSInputStream;
-import org.apache.hadoop.fs.BlockMissingException;
-import org.apache.hadoop.fs.LocalFileSystem;
 import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.fs.RemoteIterator;
-import org.apache.hadoop.fs.permission.FsPermission;
-import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.raid.Codec;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
-import org.apache.hadoop.raid.Decoder;
 import org.apache.hadoop.raid.Decoder.DecoderInputStream;
 import org.apache.hadoop.raid.ParityFilePair;
 import org.apache.hadoop.raid.RaidNode;
@@ -82,6 +69,9 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
    */
   public void initialize(URI name, Configuration conf) throws IOException {
     this.conf = conf;
+    
+    // init the codec from conf.
+    Codec.initializeCodecs(conf);
 
     Class<?> clazz = conf.getClass("fs.raid.underlyingfs.impl",
         DistributedFileSystem.class);
@@ -213,29 +203,78 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
     return true;
   }
 
+  /**
+   * search the Har-ed parity files
+   */
+  private boolean searchHarDir(FileStatus stat) 
+      throws IOException {
+    if (!stat.isDir()) {
+      return false;
+    }
+    String pattern = stat.getPath().toString() + "/*" + RaidNode.HAR_SUFFIX 
+        + "*";
+    FileStatus[] stats = globStatus(new Path(pattern));
+    if (stats != null && stats.length > 0) {
+      return true;
+    }
+      
+    stats = fs.listStatus(stat.getPath());
+   
+    // search deeper.
+    for (FileStatus status : stats) {
+      if (searchHarDir(status)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
   @Override
   public boolean rename(Path src, Path dst) throws IOException {
-    boolean renameParityFile = false;
-    Path srcParityPath = null;
-    Path destParityPath = null;
+    List<Path> srcParityList = new ArrayList<Path>();
+    List<Path> destParityList = new ArrayList<Path>();
     
-    for (Codec codec: Codec.getCodecs()) {
+    for (Codec codec : Codec.getCodecs()) {
       Path parityPath = new Path(codec.parityDirectory, makeRelative(src));
       if (fs.exists(parityPath)) {
-        renameParityFile = true;
-        srcParityPath = parityPath;
-        destParityPath = new Path(codec.parityDirectory, makeRelative(dst));
-        break;
+        
+        // check the HAR for directory
+        FileStatus stat = fs.getFileStatus(parityPath);
+        if (stat.isDir()) {
+          
+          // search for the har directory.
+          if (searchHarDir(stat)) {  
+            // HAR Path exists
+            throw new IOException("We can not rename the directory because " +
+                " there exists a HAR dir in the parity path. src = " + src);
+          }
+        }
+        
+        // we will rename the parity paths as well.
+        srcParityList.add(parityPath);
+        destParityList.add(new Path(codec.parityDirectory, makeRelative(dst)));
+      } else {
+        // check the HAR for file
+        ParityFilePair parityInHar = 
+            ParityFilePair.getParityFile(codec, src, conf);
+        if (null != parityInHar) {
+          // this means we have the parity file in HAR
+          // will throw an exception.
+          throw new IOException("We can not rename the file whose parity file" +
+              " is in HAR. src = " + src);
+        }
       }
     }
   
-  // rename the file
+    // rename the file
     if (!fs.rename(src, dst)) {
       return false;
     }
     
     // rename the parity file
-    if (renameParityFile) {
+    for (int i=0; i<srcParityList.size(); i++) {
+      Path srcParityPath = srcParityList.get(i);
+      Path destParityPath = destParityList.get(i);
       if (!fs.exists(destParityPath.getParent())) {
         fs.mkdirs(destParityPath.getParent());
       }
@@ -300,6 +339,8 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
       private final long blockSize;
       private final int buffersize;
       private final Configuration conf;
+      private Configuration innerConf;
+      private List<ParityFilePair> parityFilePairs;
 
       ExtFsInputStream(Configuration conf, DistributedRaidFileSystem lfs,
           Path path, long fileSize, long blockSize, int buffersize)
@@ -326,6 +367,23 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
         this.buffersize = buffersize;
         this.conf = conf;
         this.lfs = lfs;
+        
+        // Initialize the "inner" conf, and cache this for all future uses.
+        //Make sure we use DFS and not DistributedRaidFileSystem for unRaid.
+        this.innerConf = new Configuration(conf);
+        Class<?> clazz = conf.getClass("fs.raid.underlyingfs.impl",
+            DistributedFileSystem.class);
+        this.innerConf.set("fs.hdfs.impl", clazz.getName());
+        // Disable caching so that a previously cached RaidDfs is not used.
+        this.innerConf.setBoolean("fs.hdfs.impl.disable.cache", true);
+        
+        // load the parity files
+        this.parityFilePairs = new ArrayList<ParityFilePair>();
+        for (Codec codec : Codec.getCodecs()) {
+          ParityFilePair ppair = ParityFilePair.getParityFile(codec, 
+              this.path, this.innerConf);
+          this.parityFilePairs.add(ppair);
+        }
         
         // Open a stream to the first block.
         openCurrentStream();
@@ -463,7 +521,7 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
         nextLocation = 0;
         return value;
       }
-
+      
       @Override
       public synchronized int read(long position, byte[] b, int offset, int len) 
           throws IOException {
@@ -473,6 +531,7 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
           if (currentOffset >= fileSize) {
             return -1;
           }
+          
           openCurrentStream();
           int limit = Math.min(blockAvailable(), len);
           int value;
@@ -616,29 +675,25 @@ public class DistributedRaidFileSystem extends FilterFileSystem {
             long offset, 
             final long readLimit) 
             throws IOException{
+        
+        // Start offset of block.
+        long corruptOffset = (offset / blockSize) * blockSize;
+        
+       
+        long fileLen = this.lfs.getFileStatus(path).getLen();
+        long limit = Math.min(readLimit, 
+            blockSize - (offset - corruptOffset));
+        limit = Math.min(limit, fileLen);
+        
         while (nextLocation < Codec.getCodecs().size()) {
           
           try {
             int idx = nextLocation++;
             Codec codec = Codec.getCodecs().get(idx);
             
-            // Start offset of block.
-            long corruptOffset = (offset / blockSize) * blockSize;
-            //Make sure we use DFS and not DistributedRaidFileSystem for unRaid.
-            Configuration clientConf = new Configuration(conf);
-            Class<?> clazz = conf.getClass("fs.raid.underlyingfs.impl",
-                DistributedFileSystem.class);
-            clientConf.set("fs.hdfs.impl", clazz.getName());
-            // Disable caching so that a previously cached RaidDfs is not used.
-            clientConf.setBoolean("fs.hdfs.impl.disable.cache", true);
-           
-            long fileLen = this.lfs.getFileStatus(path).getLen();
-            long limit = Math.min(readLimit, 
-                blockSize - (offset - corruptOffset));
-            limit = Math.min(limit, fileLen);
             DecoderInputStream recoveryStream = 
-                RaidNode.unRaidCorruptInputStream(clientConf, path,
-                codec, offset, limit);
+                RaidNode.unRaidCorruptInputStream(innerConf, path, 
+                codec, parityFilePairs.get(idx), blockSize, offset, limit);
             
             if (null != recoveryStream) {
               return recoveryStream;

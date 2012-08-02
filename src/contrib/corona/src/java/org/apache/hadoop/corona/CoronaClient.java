@@ -99,12 +99,29 @@ public class CoronaClient extends Configured implements Tool {
     try {
       System.out.printf("Killing %s", sessionId);
       ClusterManagerService.Client client = getCMSClient();
-      client.killSession(sessionId);
+      try {
+        client.killSession(sessionId);
+      } catch (SafeModeException e) {
+        throw new IOException(
+          "Cannot kill session yet, ClusterManager is in Safe Mode");
+      }
       System.err.printf("%s killed", sessionId);
     } catch (TException e) {
       throw new IOException(e);
     }
     return 0;
+  }
+
+  public static void killSession(String sessionId, Configuration conf)
+    throws IOException {
+    try {
+      ClusterManagerService.Client client = getCMSClient(new CoronaConf(conf));
+      client.killSession(sessionId);
+    } catch (TException e) {
+      throw new IOException(e);
+    } catch (SafeModeException e) {
+      throw new IOException(e);
+    }
   }
 
   /**
@@ -116,8 +133,13 @@ public class CoronaClient extends Configured implements Tool {
   private int listSessions() throws IOException {
     try {
       ClusterManagerService.Client client = getCMSClient();
-
-      List<RunningSession> sessions = client.getSessions();
+      List<RunningSession> sessions;
+      try {
+        sessions = client.getSessions();
+      } catch (SafeModeException e) {
+        throw new IOException(
+          "Cannot list sessions, ClusterManager is in Safe Mode");
+      }
       System.out.printf("%d sessions currently running:\n",
           sessions.size());
       System.out.printf("SessionID\t" +
@@ -158,10 +180,20 @@ public class CoronaClient extends Configured implements Tool {
    * @throws TTransportException
    */
   private ClusterManagerService.Client getCMSClient()
-      throws TTransportException {
+    throws TTransportException {
     // Get the current configuration
     CoronaConf conf = new CoronaConf(getConf());
+    return getCMSClient(conf);
+  }
 
+  /**
+   * Get the thrift client to communicate with the cluster manager
+   * @return a thrift client initialized to talk to the cluster manager
+   * @param conf The configuration.
+   * @throws TTransportException
+   */
+  private static ClusterManagerService.Client getCMSClient(CoronaConf conf)
+    throws TTransportException {
     InetSocketAddress address = NetUtils.createSocketAddr(conf
         .getClusterManagerAddress());
     TFramedTransport transport = new TFramedTransport(

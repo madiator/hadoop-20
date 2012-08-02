@@ -62,7 +62,7 @@ public class TestClusterManager extends TestCase {
                                      new InetAddress(TstUtils.getNodeHost(i),
                                                      TstUtils.getNodePort(i)),
                                      TstUtils.std_spec);
-      nodes[i].setUsed(TstUtils.free_spec);
+      nodes[i].setFree(TstUtils.std_spec);
       nodes[i].setResourceInfos(resourceInfos);
     }
 
@@ -86,6 +86,8 @@ public class TestClusterManager extends TestCase {
         cm.nodeHeartbeat(nodes[i]);
       } catch (DisallowedNode e) {
         throw new TException(e);
+      } catch (SafeModeException e) {
+        LOG.info("Cluster Manager is in Safe Mode");
       }
     }
   }

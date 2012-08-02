@@ -96,6 +96,8 @@ import org.xml.sax.SAXException;
 public class ConfigManager {
   /** Configuration xml tag name */
   public static final String CONFIGURATION_TAG_NAME = "configuration";
+  /** Redirect xml tag name */
+  public static final String REDIRECT_TAG_NAME = "redirect";
   /** Group xml tag name */
   public static final String GROUP_TAG_NAME = "group";
   /** Pool xml tag name */
@@ -112,6 +114,10 @@ public class ConfigManager {
   public static final String MAX_TAG_NAME_PREFIX = "max";
   /** Name xml attribute */
   public static final String NAME_ATTRIBUTE = "name";
+  /** Source xml attribute (for redirect) */
+  public static final String SOURCE_ATTRIBUTE = "source";
+  /** Destination xml attribute (for redirect) */
+  public static final String DESTINATION_ATTRIBUTE = "destination";
 
   /** Logger */
   private static final Log LOG = LogFactory.getLog(ConfigManager.class);
@@ -172,6 +178,8 @@ public class ConfigManager {
   private Map<PoolInfo, ScheduleComparator> poolInfoToComparator;
   /** The Map of the weights configuration for the pools */
   private Map<PoolInfo, Double> poolInfoToWeight;
+  /** The Map of redirections (source -> target) for PoolInfo objects */
+  private Map<PoolInfo, PoolInfo> poolInfoToRedirect;
   /** The default comparator for the schedulables within the pool */
   private ScheduleComparator defaultComparator;
   /** The ratio of the share to consider starvation */
@@ -270,7 +278,12 @@ public class ConfigManager {
     }
     classLoader = cl;
 
-    generatePoolsConfigIfClassSet();
+    if (poolsConfigDocumentGenerator != null) {
+      if (generatePoolsConfigIfClassSet() == null) {
+        throw new IllegalStateException("Failed to generate the pools " +
+            "config.  Must succeed on initialization of ConfigManager.");
+      }
+    }
     try {
       findConfigFiles();
       reloadAllConfig();
@@ -442,6 +455,31 @@ public class ConfigManager {
   }
 
   /**
+   * Get a redirected PoolInfo (destination) from the source.  Only supports
+   * one level of redirection.
+   * @param poolInfo Pool info to check for a destination
+   * @return Destination pool info if one exists, else return the input
+   */
+  public synchronized PoolInfo getRedirect(PoolInfo poolInfo) {
+    PoolInfo destination = (poolInfoToRedirect == null) ? poolInfo :
+        poolInfoToRedirect.get(poolInfo);
+    if (destination == null) {
+      return poolInfo;
+    }
+    return destination;
+  }
+
+  /**
+   * Get a copy of the map of redirects (used for cm.jsp)
+   *
+   * @return Map of redirects otherwise null if none exists
+   */
+  public synchronized Map<PoolInfo, PoolInfo> getRedirects() {
+    return (poolInfoToRedirect == null) ? null :
+        new HashMap<PoolInfo, PoolInfo>(poolInfoToRedirect);
+  }
+
+  /**
    * Get the comparator to use for scheduling sessions within a pool
    * @param poolInfo Pool info to check
    * @return the scheduling comparator to use for the pool
@@ -552,20 +590,22 @@ public class ConfigManager {
   }
 
   /**
-   * If the {@link PoolsConfigDocumentGenerator} is set, generate the new
-   * pools config to a randomly named file and use a rename
-   * operation to atomically get it in place.  Synchronized due to potential
-   * conflict from a fetch pools config http request.
+   * Generate the new pools configuration using the configuration generator.
+   * The generated configuration is written to a temporary file and then
+   * atomically renamed to the specified destination file.
+   * This function may be called concurrently and it is safe to do so because
+   * of the atomic rename to the destination file.
    *
    * @return Md5 of the generated file or null if generation failed.
    */
-  public synchronized String generatePoolsConfigIfClassSet() {
+  public String generatePoolsConfigIfClassSet() {
     if (poolsConfigDocumentGenerator == null) {
       return null;
     }
     Document document = poolsConfigDocumentGenerator.generatePoolsDocument();
     if (document == null) {
-      LOG.info("generatePoolsConfig: Did not generate a valid pools xml file");
+      LOG.warn("generatePoolsConfig: Did not generate a valid pools xml file");
+      return null;
     }
 
     // Write the content into a temporary xml file and rename to the
@@ -610,7 +650,9 @@ public class ConfigManager {
   }
 
   /**
-   * Reload the general configuration and update all in-memory values
+   * Reload the general configuration and update all in-memory values. Should
+   * be invoked under synchronization.
+   *
    * @throws IOException
    * @throws SAXException
    * @throws ParserConfigurationException
@@ -631,6 +673,8 @@ public class ConfigManager {
 
     newTypeToNodeWait = new EnumMap<ResourceType, Long>(ResourceType.class);
     newTypeToRackWait = new EnumMap<ResourceType, Long>(ResourceType.class);
+    Map<PoolInfo, PoolInfo> newPoolInfoToRedirect =
+        new HashMap<PoolInfo, PoolInfo>();
 
     for (ResourceType type : TYPES) {
       newTypeToNodeWait.put(type, 0L);
@@ -714,6 +758,18 @@ public class ConfigManager {
       if (matched(element, "scheduleFromNodeToSession")) {
         newScheduleFromNodeToSession = Boolean.parseBoolean(getText(element));
       }
+      if (matched(element, REDIRECT_TAG_NAME)) {
+        PoolInfo source = PoolInfo.createPoolInfo(
+            element.getAttribute(SOURCE_ATTRIBUTE));
+        PoolInfo destination = PoolInfo.createPoolInfo(
+            element.getAttribute(DESTINATION_ATTRIBUTE));
+        if (source == null || destination == null) {
+          LOG.error("Illegal redirect source " + source + " or destination " +
+              destination);
+        } else {
+          newPoolInfoToRedirect.put(source, destination);
+        }
+      }
     }
     synchronized (this) {
       this.typeToNodeWait = newTypeToNodeWait;
@@ -727,6 +783,7 @@ public class ConfigManager {
       this.preemptedTaskMaxRunningTime = newPreemptedTaskMaxRunningTime;
       this.preemptionRounds = newPreemptionRounds;
       this.scheduleFromNodeToSession = newScheduleFromNodeToSession;
+      this.poolInfoToRedirect = newPoolInfoToRedirect;
     }
   }
 

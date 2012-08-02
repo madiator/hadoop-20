@@ -76,15 +76,15 @@ public class ResourceLimit {
    * @return true if the node has enough memory, false otherwise
    */
   public boolean hasEnoughMemory(ClusterNode node) {
-    int used = node.getUsed().memoryMB;
     int total = node.getTotal().memoryMB;
-    int free = total - used;
+    int free = node.getFree().memoryMB;
     if (free < nodeReservedMemoryMB) {
-      LOG.info(node.getHost() + " not enough memory." +
-        " totalMB:" + total +
-        " used:" + used +
-        " free:" + free +
-        " limit:" + nodeReservedMemoryMB);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(node.getHost() + " not enough memory." +
+          " totalMB:" + total +
+          " free:" + free +
+          " limit:" + nodeReservedMemoryMB);
+      }
       return false;
     }
     return true;
@@ -96,15 +96,15 @@ public class ResourceLimit {
    * @return true if the node has enough space, false otherwise
    */
   private boolean hasEnoughDiskSpace(ClusterNode node) {
-    int used = node.getUsed().diskGB;
     int total = node.getTotal().diskGB;
-    int free = total - used;
+    int free = node.getFree().diskGB;
     if (free < nodeReservedDiskGB) {
-      LOG.info(node.getHost() + " not enough disk space." +
-        " totalMB:" + total +
-        " used:" + used +
-        " free:" + free +
-        " limit:" + nodeReservedDiskGB);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(node.getHost() + " not enough disk space." +
+          " totalMB:" + total +
+          " free:" + free +
+          " limit:" + nodeReservedDiskGB);
+      }
       return false;
     }
     return true;

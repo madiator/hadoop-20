@@ -78,9 +78,10 @@ public class Standby implements Runnable{
   private boolean checkpointEnabled;
   volatile private Thread backgroundThread;  // thread for secondary namenode 
   volatile private CheckpointSignature sig;
+  private volatile String checkpointStatus;
   
   // two different types of ingested file
-  enum IngestFile { EDITS, EDITS_NEW };
+  public enum IngestFile { EDITS, EDITS_NEW };
   
   // allowed states of the ingest thread
   enum StandbyIngestState {
@@ -135,6 +136,7 @@ public class Standby implements Runnable{
     InetSocketAddress addr = NameNode.getAddress(conf);
     this.tmpImageFileForValidation = new File("/tmp", 
         "hadoop_image." + addr.getHostName() + ":" + addr.getPort());
+    checkpointStatus("No checkpoint initiated");
   }
 
   public void run() {
@@ -166,6 +168,8 @@ public class Standby implements Runnable{
           earlyScheduledCheckpointTime = Long.MAX_VALUE;
           lastCheckpointTime = now;
 
+          InjectionHandler
+              .processEvent(InjectionEvent.STANDBY_AFTER_DO_CHECKPOINT);
           // set the last expected checkpoint time on the primary.
           avatarNode.setStartCheckpointTime(startupConf);
         }
@@ -182,6 +186,7 @@ public class Standby implements Runnable{
         // if the checkpoint creation has switched off ingesting, then we restart the
         // ingestion here.
         if (ingest == null) {
+          InjectionHandler.processEvent(InjectionEvent.STANDBY_CREATE_INGEST_RUNLOOP);
           instantiateIngest(IngestFile.EDITS);
         }
         try {
@@ -283,6 +288,13 @@ public class Standby implements Runnable{
     synchronized (ingestStateLock) {
       assertState(StandbyIngestState.NOT_INGESTING);
       edits = getIngestFile(type);
+      // if the file does not exist, 
+      // do not change the state
+      if (!edits.exists()
+          || InjectionHandler
+              .falseCondition(InjectionEvent.STANDBY_EDITS_NOT_EXISTS, type)) {
+        return;
+      }
       setCurrentIngestFile(edits);
       ingest = new Ingest(this, fsnamesys, confg, edits);
       ingestThread = new Thread(ingest);
@@ -291,7 +303,7 @@ public class Standby implements Runnable{
           ? StandbyIngestState.INGESTING_EDITS
           : StandbyIngestState.INGESTING_EDITS_NEW;
     } 
-    LOG.info("Standby: Instatiated ingest for edits file: " + edits.getName());
+    LOG.info("Standby: Instantiated ingest for edits file: " + edits.getName());
   }
   
   /**
@@ -398,8 +410,14 @@ public class Standby implements Runnable{
       reprocessEdits = true;
     }
     
+    // if the transactions don't match,
+    // there is most probably edits.new
+    if (!transactionsMatch(lastTxId, logVersion)) {
+      pollEditsNew(30);
+    }
+    
     // handle "edits.new"
-    if (editsFileNew.exists()) {
+    if (editsNewExists()) {
       logVersion = processIngestFileForQuiescing(IngestFile.EDITS_NEW);
       clearIngestState();
     } 
@@ -449,12 +467,23 @@ public class Standby implements Runnable{
    * when the remote namenode is restarted. This method returns true if the remote 
    * namenode has done an unexpected checkpoint. This method retrieves the fstime of the
    * remote namenode and matches it against the fstime of the checkpoint when this
-   * AvatarNode did a full-sync of the edits log.
+   * AvatarNode did a full-sync of the edits log. It also matches the size of
+   * both the images. The reason for this is as follows :
+   *
+   * Just after a checkpoint is done there is small duration of time when the
+   * remote and local fstime don't match even for a good checkpoint, but
+   * fortunately both the images do match and we should check whether both
+   * have the same size. Note that even if this check does not catch a stale
+   * checkpoint (in the rare case where both images have the same length but
+   * are not the same), our transaction id based verification will definitely
+   * catch this issue.
    */
   boolean hasStaleCheckpoint() throws IOException {
     long remotefsTime = avatarNode.readRemoteFstime(startupConf);
     long localfsTime = avatarNode.getStartCheckpointTime();
-    if (remotefsTime != localfsTime) {
+    long remoteImageSize = avatarNode.getRemoteImageFile(startupConf).length();
+    long localImageSize = avatarNode.getAvatarImageFile(startupConf).length();
+    if (remotefsTime != localfsTime && remoteImageSize != localImageSize) {
       LOG.warn("Standby: The remote active namenode might have been restarted.");
       LOG.warn("Standby: The fstime of checkpoint from which the Standby was created is " +
                AvatarNode.dateForm.format(new Date(localfsTime)) +
@@ -464,6 +493,36 @@ public class Standby implements Runnable{
       return true;
     }
     return false;
+  }
+  
+  private void pollEditsNew(int numRetries) throws IOException {
+    for (int i = 0; i < numRetries; i++) {
+      if (editsNewExists())
+        break;
+      try {
+        Thread.sleep(1000);
+      } catch (InterruptedException e) {
+        throw new IOException("Standby: - received interruption");
+      }
+      LOG.info("Standby: - retrying to check if edits.new exists... try: "
+          + i);
+    }
+  }
+  
+  /**
+   * Set current checkpoint status
+   */
+  private void checkpointStatus(String st) {
+    checkpointStatus = new Date(System.currentTimeMillis()).toString() + ": "
+        + st;
+  }
+
+  /**
+   * Get current checkpoint status.
+   * Used for webui.
+   */
+  protected String getCheckpointStatus() {
+    return checkpointStatus;
   }
  
   /**
@@ -478,6 +537,7 @@ public class Standby implements Runnable{
       // Tell the remote namenode to start logging transactions in a new edit file
       // Retuns a token that would be used to upload the merged image.
       if (!checkpointEnabled) {
+        checkpointStatus("Disabled");
         // This means the Standby is not meant to checkpoint the primary
         LOG.info("Standby: Checkpointing is disabled - return");
         return;
@@ -487,10 +547,12 @@ public class Standby implements Runnable{
       try {
         LOG.info("Standby: Checkpointing - Roll edits logs of primary namenode "
             + nameNodeAddr);
+        checkpointStatus("Edit log rolled on primary");
         sig = (CheckpointSignature) primaryNamenode.rollEditLog();
       } catch (IOException ex) {
         // In this case we can return since we did not kill the Ingest thread yet
         // Nothing prevents us from doing the next checkpoint attempt
+        checkpointStatus("Checkpoint failed");
         LOG.warn("Standby: Checkpointing - roll Edits on the primary node failed.");
         return;
       }
@@ -522,11 +584,13 @@ public class Standby implements Runnable{
         LOG.info("Standby: Checkpointing - creating ingest thread to process all transactions.");
         instantiateIngest(IngestFile.EDITS);
       }  
-            
+      
+      checkpointStatus("Quiescing ingest");
       quiesceIngest(IngestFile.EDITS, sig);    
       LOG.info("Standby: Checkpointing - finished quitting ingest thread just before ckpt.");
       
       if (!ingest.getIngestStatus()) {
+        checkpointStatus("Re-quiescing ingest");
         // try to reopen the log and re-read it
         instantiateIngest(IngestFile.EDITS);
         quiesceIngest(IngestFile.EDITS, sig);
@@ -563,6 +627,7 @@ public class Standby implements Runnable{
         // We should ideally use fsnamesystem.saveNamespace but that works
         // only if namenode is not in safemode.
         LOG.info("Standby: Checkpointing - save fsimage on local namenode.");
+        checkpointStatus("Saving namespace started");
         fsnamesys.saveNamespace(false, false);
       } catch (SaveNamespaceCancelledException e) {
         InjectionHandler.processEvent(InjectionEvent.STANDBY_CANCELLED_EXCEPTION_THROWN);
@@ -579,6 +644,8 @@ public class Standby implements Runnable{
         currentIngestState = StandbyIngestState.NOT_INGESTING;
         fsnamesys.writeUnlock();
       }
+      
+      pollEditsNew(30);
       
       // we can start the ingest again for edits.new!!!
       instantiateIngest(IngestFile.EDITS_NEW);
@@ -597,6 +664,7 @@ public class Standby implements Runnable{
     } catch (IOException e) {
       LOG.error("Standby: Checkpointing - failed to complete the checkpoint: "
           + StringUtils.stringifyException(e));
+      checkpointStatus("Checkpoint failed");
       throw e;
     } finally {
       InjectionHandler.processEvent(InjectionEvent.STANDBY_EXIT_CHECKPOINT, this.sig);
@@ -644,6 +712,7 @@ public class Standby implements Runnable{
     
     // copy image to primary namenode
     LOG.info("Standby: Checkpointing - Upload fsimage to remote namenode.");
+    checkpointStatus("Image upload started");
     putFSImage(sig);
 
     // check if the image is valid
@@ -664,26 +733,37 @@ public class Standby implements Runnable{
         StandbyIngestState.NOT_INGESTING,
         StandbyIngestState.INGESTING_EDITS_NEW);
     
-    try {
-      primaryNamenode.rollFsImage(new CheckpointSignature(fsImage));
-    } catch (IOException e) {
-      if (!editsNewExists())
-        throw new RuntimeException(
-            "Roll did not succeed but edits.new does not exist!!!");
-      throw e;
+    // we might concurrently reopen ingested file because of 
+    // checksum error
+    synchronized (ingestStateLock) {
+      boolean editsNewExisted = editsNewExists();
+      try {
+        primaryNamenode.rollFsImage(new CheckpointSignature(fsImage));
+      } catch (IOException e) {
+        if (editsNewExisted && !editsNewExists()
+            && currentIngestState == StandbyIngestState.INGESTING_EDITS_NEW) {
+          // we were ingesting edits.new
+          // the roll did not succeed but edits.new does not exist anymore          
+          // assume that the roll succeeded   
+          LOG.warn("Roll did not succeed but edits.new does not exist!!! - assuming roll succeeded", e);
+        } else {
+          throw e;
+        }
+      }
+      // after successful roll edits.new is rolled to edits
+      // and we should be consuming it
+      setCurrentIngestFile(editsFile);
+      if (currentIngestState == StandbyIngestState.INGESTING_EDITS_NEW) {
+        // 1) We currently consume edits.new - do the swap
+        currentIngestState = StandbyIngestState.INGESTING_EDITS;
+      } // 2) otherwise we don't consume anything - do not change the state
     }
-    // after successful roll edits.new is rolled to edits
-    // and we should be consuming it
-    setCurrentIngestFile(editsFile);
-    if (currentIngestState == StandbyIngestState.INGESTING_EDITS_NEW) {
-      // 1) We currently consume edits.new - do the swap
-      currentIngestState = StandbyIngestState.INGESTING_EDITS;
-    } // 2) otherwise we don't consume anything - do not change the state
     setLastRollSignature(null);
     lastFinalizeCheckpointFailed = false;
-
+    
     LOG.info("Standby: Checkpointing - Checkpoint done. New Image Size: "
         + fsImage.getFsImageName().length());
+    checkpointStatus("Completed");
   }
 
   /**
@@ -831,7 +911,7 @@ public class Standby implements Runnable{
   }
   
   private boolean editsNewExists() { 
-    return editsFileNew.exists();
+    return editsFileNew.exists() || editsFileNew.length() > 0;
   }
   
   /**

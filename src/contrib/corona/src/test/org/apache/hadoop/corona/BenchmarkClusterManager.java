@@ -61,7 +61,7 @@ public class BenchmarkClusterManager {
           new InetAddress(TstUtils.getNodeHost(i),
               TstUtils.getNodePort(i)),
           TstUtils.std_spec);
-      nodes[i].setUsed(TstUtils.free_spec);
+      nodes[i].setFree(TstUtils.std_spec);
       nodes[i].setResourceInfos(resourceInfos);
     }
 
@@ -126,6 +126,8 @@ public class BenchmarkClusterManager {
           LOG.error("Node disallowed ", dex);
         } catch (TException e) {
           LOG.error("Node heartbeat error ", e);
+        } catch (SafeModeException e) {
+          LOG.info("Cluster Manager is in Safe Mode");
         }
       }
     }

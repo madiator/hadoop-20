@@ -116,10 +116,8 @@ public class NodeManager implements Configurable {
                 if (resourceLimit.hasEnoughResource(node)) {
                   // When pass == 0, try to average out the load.
                   if (pass == 0) {
-                    synchronized (node) {
-                      if (node.getGrantCount(type) < avgLoad) {
-                        return node;
-                      }
+                    if (node.getGrantCount(type) < avgLoad) {
+                      return node;
                     }
                   } else {
                     return node;
@@ -337,6 +335,12 @@ public class NodeManager implements Configurable {
       }
     }
 
+    /**
+     * Checks if a node is present as runnable in this index. Should be called
+     * while holding the node lock.
+     * @param clusterNode The node.
+     * @return A boolean indicating if the node is present.
+     */
     public boolean hasRunnable(ClusterNode clusterNode) {
       String host = clusterNode.getHost();
       NodeContainer nodeContainer = hostToRunnableNodes.get(host);
@@ -541,6 +545,11 @@ public class NodeManager implements Configurable {
     }
   }
 
+  /**
+   * Update the runnable status of a node based on resources available.
+   * This checks both resources and slot availability.
+   * @param node The node
+   */
   private void updateRunnability(ClusterNode node) {
     synchronized (node) {
       for (Map.Entry<ResourceType, RunnableIndices> entry :
@@ -551,10 +560,11 @@ public class NodeManager implements Configurable {
         boolean currentlyRunnable = r.hasRunnable(node);
         boolean shouldBeRunnable = node.checkForGrant(unitReq, resourceLimit);
         if (currentlyRunnable && !shouldBeRunnable) {
-          LOG.info("Node " + node.getName() + " is no longer runnable");
+          LOG.info("Node " + node.getName() + " is no longer " +
+            type + " runnable");
           r.deleteRunnable(node);
         } else if (!currentlyRunnable && shouldBeRunnable) {
-          LOG.info("Node " + node.getName() + " is now runnable");
+          LOG.info("Node " + node.getName() + " is now " + type + " runnable");
           r.addRunnable(node);
         }
       }
@@ -877,6 +887,11 @@ public class NodeManager implements Configurable {
     }
   }
 
+  /**
+   * Check if a node has enough resources.
+   * @param node The node
+   * @return A boolean indicating if it has enough resources.
+   */
   public boolean hasEnoughResource(ClusterNode node) {
     return resourceLimit.hasEnoughResource(node);
   }
@@ -891,6 +906,11 @@ public class NodeManager implements Configurable {
       while (!shutdown) {
         try {
           Thread.sleep(nodeExpiryInterval / 2);
+
+          if (clusterManager.safeMode) {
+            // Do nothing but sleep
+            continue;
+          }
 
           long now = ClusterManager.clock.getTime();
           for (ClusterNode node : nameToNode.values()) {
@@ -1119,5 +1139,16 @@ public class NodeManager implements Configurable {
 
   public ResourceLimit getResourceLimit() {
     return resourceLimit;
+  }
+
+  /**
+   * This is required when we come out of safe mode, and we need to reset
+   * the lastHeartbeatTime for each node
+   */
+  public void resetNodesLastHeartbeatTime() {
+    long now = ClusterManager.clock.getTime();
+    for (ClusterNode node : nameToNode.values()) {
+      node.lastHeartbeatTime = now;
+    }
   }
 }

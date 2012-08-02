@@ -75,7 +75,7 @@ public abstract class ErasureCode {
     List<Integer> locationsToRead = new ArrayList<Integer>(stripeSize());
     int limit = stripeSize() + paritySize();
     // Loop through all possible locations in the stripe.
-    for (int loc = 0; loc < limit; loc++) {
+    for (int loc = limit - 1; loc >= 0; loc--) {
       // Is the location good.
       if (erasedLocations.indexOf(loc) == -1) {
         locationsToRead.add(loc);
@@ -113,6 +113,10 @@ public abstract class ErasureCode {
 
   public abstract int symbolSize();
 
+  /**
+   * This method would be overridden in the subclass, 
+   * so that the subclass will have its own encodeBulk behavior. 
+   */
   public void encodeBulk(byte[][] inputs, byte[][] outputs) {
     final int stripeSize = stripeSize();
     final int paritySize = paritySize();
@@ -135,6 +139,10 @@ public abstract class ErasureCode {
     }
   }
 
+  /**
+   * This method would be overridden in the subclass, 
+   * so that the subclass will have its own decodeBulk behavior. 
+   */
   public void decodeBulk(byte[][] readBufs, byte[][] writeBufs,
       int[] erasedLocations, int[] locationsToRead, int[] locationsNotToRead) {
 	    

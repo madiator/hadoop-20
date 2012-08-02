@@ -16,9 +16,6 @@
  */
 
 $(document).ready(function() {
-   $('#switcher').themeswitcher({
-     loadTheme: "UI lightness"
-   });
    // Multi select objects
    $("#poolGroupSelect").multiselect({
        noneSelectedText: 'Select pool group(s)',
@@ -65,28 +62,76 @@ $(document).ready(function() {
     "bJQueryUI": true,
     "bPaginate": false,
     "bSearchable": false,
+    "bSortClasses": false,
     "sScrollX": "100%",
     "bScrollCollapse": true,
   });
   $("#activeTable").dataTable({
     "bJQueryUI": true,
-    "bPaginate": false,
+    "bPaginate": true,
+    "bSortClasses": false,
+    "bStateSave": false,
     "sScrollX": "100%",
     "bScrollCollapse": true,
+    "iDisplayLength": 10,
+    "aLengthMenu": [[10, 25, 50, 100, -1],[10, 25, 50, 100, "All"]],
+    "bProcessing": true,
+    "fnServerParams": function (aoData) {
+        aoData.push({
+            "name": "users",
+            "value": getParameterByName("users")});
+        aoData.push({
+            "name": "poolGroups",
+            "value": getParameterByName("poolGroups")});
+        aoData.push({
+            "name" : "poolInfos",
+            "value": getParameterByName("poolInfos")});
+    },
+    "sAjaxSource": "/active_json.jsp",
   });
   $("#poolTable").dataTable({
     "bJQueryUI": true,
     "bPaginate": false,
+    "bSortClasses": false,
+    "bStateSave": false,
     "sScrollX": "100%",
     "bScrollCollapse": true,
+    "bProcessing": true,
+    "fnServerParams": function (aoData) {
+        aoData.push({
+            "name": "users",
+            "value": getParameterByName("users")});
+        aoData.push({
+            "name": "poolGroups",
+            "value": getParameterByName("poolGroups")});
+        aoData.push({
+            "name" : "poolInfos",
+            "value": getParameterByName("poolInfos")});
+    },
+    "sAjaxSource": "/pool_json.jsp",
   });
   $("#retiredTable").dataTable({
     "bJQueryUI": true,
     "bPaginate": true,
+    "bSortClasses": false,
+    "bStateSave": false,
     "sScrollX": "100%",
     "bScrollCollapse": true,
     "iDisplayLength": 10,
-    "aLengthMenu": [[10, 25, 50, 100, -1],[10, 25, 50, 100, "All"]]
+    "aLengthMenu": [[10, 25, 50, 100, -1],[10, 25, 50, 100, "All"]],
+    "bProcessing": true,
+    "fnServerParams": function (aoData) {
+        aoData.push({
+            "name": "users",
+            "value": getParameterByName("users")});
+        aoData.push({
+            "name": "poolGroups",
+            "value": getParameterByName("poolGroups")});
+        aoData.push({
+            "name" : "poolInfos",
+            "value": getParameterByName("poolInfos")});
+    },
+    "sAjaxSource": "/retired_json.jsp",
   });
 
   // Hide the retired table
@@ -102,6 +147,10 @@ $(document).ready(function() {
   $("#retiredToggle").click(function () {
     $("#retiredTable").toggle();
   });
+
+  $('#switcher').themeswitcher({
+    loadTheme: "UI lightness"
+  });
 });
 
 function toggle(id) {
@@ -112,3 +161,10 @@ function toggle(id) {
     document.getElementById(id).style.display = 'none';
   }
 }
+
+function getParameterByName(name) {
+    var match = RegExp('[?&]' + name + '=([^&]*)')
+        .exec(window.location.search);
+    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
+}
+

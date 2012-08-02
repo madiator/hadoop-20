@@ -81,8 +81,16 @@ public abstract class RaidNode implements RaidProtocol {
     Configuration.addDefaultResource("hdfs-site.xml");
     Configuration.addDefaultResource("mapred-default.xml");
     Configuration.addDefaultResource("mapred-site.xml");
+    Configuration.addDefaultResource("raid-default.xml");
+    Configuration.addDefaultResource("raid-site.xml");
   }
+  public static enum LOGTYPES {
+    ONLINE_RECONSTRUCTION,
+    OFFLINE_RECONSTRUCTION,
+    ENCODING
+  };
   public static final Log LOG = LogFactory.getLog(RaidNode.class);
+  public static final Log ENCODER_METRICS_LOG = LogFactory.getLog("RaidMetrics"); 
   public static final long SLEEP_TIME = 10000L; // 10 seconds
   public static final String TRIGGER_MONITOR_SLEEP_TIME_KEY = 
       "hdfs.raid.trigger.monitor.sleep.time";
@@ -480,6 +488,16 @@ public abstract class RaidNode implements RaidProtocol {
     return ((CorruptFileCounter)blockIntegrityMonitor.
         getCorruptFileCounter()).getCounterMap();
   }
+  
+  public long getNumFilesWithMissingBlks() {
+    return ((CorruptFileCounter)blockIntegrityMonitor.
+        getCorruptFileCounter()).getFilesWithMissingBlksCnt();
+  }
+  
+  public long[] getNumStrpWithMissingBlksRS(){
+    return ((CorruptFileCounter)blockIntegrityMonitor.
+        getCorruptFileCounter()).getNumStrpWithMissingBlksRS();
+  }
 
   public String getHostName() {
     return this.infoBindAddress;
@@ -634,10 +652,17 @@ public abstract class RaidNode implements RaidProtocol {
       } else {
         LOG.info("Start new traversal for policy " + policyName);
         scanState.startTime = now();
-        traversal = DirectoryTraversal.raidFileRetriever(
-            info, info.getSrcPathExpanded(), allPolicies, conf,
-            directoryTraversalThreads, directoryTraversalShuffle,
-            true);
+        if (!Codec.getCodec(info.getCodecId()).isDirRaid) {
+          traversal = DirectoryTraversal.raidFileRetriever(
+              info, info.getSrcPathExpanded(), allPolicies, conf,
+              directoryTraversalThreads, directoryTraversalShuffle,
+              true);
+        } else {
+          traversal = DirectoryTraversal.raidLeafDirectoryRetriever(
+              info, info.getSrcPathExpanded(), allPolicies, conf,
+              directoryTraversalThreads, directoryTraversalShuffle,
+              true);
+        }
         scanState.setTraversal(traversal);
       }
 
@@ -676,6 +701,7 @@ public abstract class RaidNode implements RaidProtocol {
         }
       }
 
+      Codec codec = Codec.getCodec(info.getCodecId());
       String l = null;
       try {
         while ((l = scanState.fileListReader.readLine()) != null) {
@@ -686,8 +712,28 @@ public abstract class RaidNode implements RaidProtocol {
           try {
             stat = ParityFilePair.FileStatusCache.get(fs, p);
           } catch (FileNotFoundException e) {
+            LOG.warn("Path " + p  + " does not exist", e);
           }
-          if (stat != null && stat.getReplication() > targetReplication) {
+          if (stat == null) {
+            continue;
+          }
+          short repl = 0;
+          if (codec.isDirRaid) {
+            if (!stat.isDir()) {
+              continue;
+            }
+            List<FileStatus> lfs = RaidNode.listDirectoryRaidFileStatus(conf, fs, p);
+            if (lfs == null) {
+              continue;
+            }
+            repl = DirectoryStripeReader.getReplication(lfs);
+          } else {
+            repl = stat.getReplication();
+          }
+          if (repl > targetReplication) {
+            list.add(stat);
+          } else if (repl == targetReplication &&
+                     !ParityFilePair.parityExists(stat, codec, conf)) {
             list.add(stat);
           }
           if (list.size() >= selectLimit) {
@@ -767,10 +813,10 @@ public abstract class RaidNode implements RaidProtocol {
               " " + filteredPaths.size() + " files");
           try {
             raidFiles(info, filteredPaths);
-          } catch (Exception e) {
+          } catch (Throwable e) {
             LOG.info("Exception while invoking action on policy " + info.getName() +
                 " srcPath " + info.getSrcPath() + 
-                " exception " + StringUtils.stringifyException(e));
+                " exception " + StringUtils.stringifyException(e), e);
             continue;
           }
         }
@@ -842,7 +888,7 @@ public abstract class RaidNode implements RaidProtocol {
 
 
   /**
-   * RAID an individual file
+   * RAID an individual file/directory
    */
   static public boolean doRaid(Configuration conf, PolicyInfo info,
       FileStatus src, Statistics statistics, 
@@ -862,7 +908,7 @@ public abstract class RaidNode implements RaidProtocol {
           reporter, doSimulate, targetRepl, metaRepl);
   }
   
-  public static List<FileStatus> getDirectoryBlockLocations(Configuration conf,
+  public static List<FileStatus> listDirectoryRaidFileStatus(Configuration conf,
       FileSystem srcFs, Path p) throws IOException {
     long minFileSize = conf.getLong(MINIMUM_RAIDABLE_FILESIZE_KEY,
         MINIMUM_RAIDABLE_FILESIZE);
@@ -883,16 +929,61 @@ public abstract class RaidNode implements RaidProtocol {
     return lfs;
   }
   
+  public static List<LocatedFileStatus> listDirectoryRaidLocatedFileStatus(
+      Configuration conf, FileSystem srcFs, Path p) throws IOException {
+    long minFileSize = conf.getLong(MINIMUM_RAIDABLE_FILESIZE_KEY,
+        MINIMUM_RAIDABLE_FILESIZE);
+    List<LocatedFileStatus> lfs = new ArrayList<LocatedFileStatus>();
+    RemoteIterator<LocatedFileStatus> iter = srcFs.listLocatedStatus(p);
+    while (iter.hasNext()) {
+      LocatedFileStatus stat = iter.next();
+      if (stat.isDir()) {
+        return null;
+      }
+      // We don't raid too small files
+      if (stat.getLen() < minFileSize) {
+        continue;
+      }
+      lfs.add(stat);
+    }
+    if (lfs.size() == 0)
+      return null;
+    return lfs;
+  }
+  
   public static boolean doRaid(Configuration conf, FileStatus stat,
       Path destPath, Codec codec, Statistics statistics,
       Progressable reporter, boolean doSimulate, int targetRepl, int metaRepl)
         throws IOException {
-    if (codec.isDirRaid) {
-      return doDirRaid(conf, stat, destPath, codec, statistics, reporter,
-          doSimulate, targetRepl, metaRepl);
-    } else {
-      return doFileRaid(conf, stat, destPath, codec, statistics, reporter,
-          doSimulate, targetRepl, metaRepl);
+    long startTime = System.currentTimeMillis();
+    boolean success = false;
+    try {
+      if (codec.isDirRaid) {
+        success = doDirRaid(conf, stat, destPath, codec, statistics, reporter,
+            doSimulate, targetRepl, metaRepl);
+      } else {
+        success = doFileRaid(conf, stat, destPath, codec, statistics, reporter,
+            doSimulate, targetRepl, metaRepl);
+      }
+      return success;
+    } catch (IOException ioe) {
+      throw ioe;
+    } finally {
+      long delay = System.currentTimeMillis() - startTime;
+      long savingBytes = statistics.processedSize - 
+          statistics.remainingSize - statistics.metaSize;
+      FileSystem srcFs = stat.getPath().getFileSystem(conf);
+      if (success) {
+        logRaidEncodingMetrics("SUCCESS", codec,
+            delay, statistics.processedSize, statistics.numProcessedBlocks,
+            statistics.numMetaBlocks, statistics.metaSize, 
+            savingBytes, stat.getPath(), LOGTYPES.ENCODING, srcFs);
+      } else {
+        logRaidEncodingMetrics("FAILURE", codec, delay,
+            statistics.processedSize, statistics.numProcessedBlocks,
+            statistics.numMetaBlocks, statistics.metaSize, 
+            savingBytes, stat.getPath(), LOGTYPES.ENCODING, srcFs);
+      }
     }
   }
   
@@ -913,7 +1004,7 @@ public abstract class RaidNode implements RaidProtocol {
         throws IOException {
     Path p = stat.getPath();
     FileSystem srcFs = p.getFileSystem(conf);
-    List<FileStatus> lfs = RaidNode.getDirectoryBlockLocations(conf, srcFs, p);
+    List<FileStatus> lfs = RaidNode.listDirectoryRaidFileStatus(conf, srcFs, p);
     if (lfs == null) {
       return false;
     }
@@ -1049,7 +1140,7 @@ public abstract class RaidNode implements RaidProtocol {
                                       throws IOException {
     Path inpath = stat.getPath();
     Path outpath =  getOriginalParityFile(destPathPrefix, inpath);
-    FileSystem outFs = outpath.getFileSystem(conf);
+    FileSystem outFs = inFs;
 
     // If the parity file is already upto-date and source replication is set
     // then nothing to do.
@@ -1118,23 +1209,23 @@ public abstract class RaidNode implements RaidProtocol {
 
   
   public static DecoderInputStream unRaidCorruptInputStream(Configuration conf,
-              Path srcPath, Codec codec, long corruptOffset,
+              Path srcPath, Codec codec, ParityFilePair parityFilePair, 
+              long blockSize,
+              long corruptOffset,
               long limit) 
               throws IOException {
- // Test if parity file exists
-    ParityFilePair ppair = ParityFilePair.getParityFile(codec, srcPath, conf);
-    if (ppair == null) {
+    // Test if parity file exists
+    if (parityFilePair == null) {
       LOG.warn("Could not find " + codec.id + " parity file for " + srcPath);
       return null;
     }
     
     FileSystem srcFs = srcPath.getFileSystem(conf);
-    FileStatus stat = srcFs.getFileStatus(srcPath);
     Decoder decoder = new Decoder(conf, codec);
     
     return decoder.generateAlternateStream(srcFs, srcPath, 
-        ppair.getFileSystem(), ppair.getPath(), 
-        stat.getBlockSize(), corruptOffset, limit, null);
+        parityFilePair.getFileSystem(), parityFilePair.getPath(), 
+        blockSize, corruptOffset, limit, null);
   }
   
   private void doHar() throws IOException, InterruptedException {
@@ -1152,6 +1243,10 @@ public abstract class RaidNode implements RaidProtocol {
 
       // fetch all categories
       for (Codec codec : Codec.getCodecs()) {
+        if (codec.isDirRaid) {
+          // Disable har for directory raid
+          continue;
+        }
         try {
           String tmpHarPath = codec.tmpHarDirectory;
           int harThresold = conf.getInt(RAID_PARITY_HAR_THRESHOLD_DAYS_KEY,
@@ -1420,10 +1515,39 @@ public abstract class RaidNode implements RaidProtocol {
     return conf.get("mapred.job.id", 
         "localRaid" + df.format(new Date())); 
   }
+  
+  public String getReadReconstructionMetricsUrl() {
+    return configMgr.getReadReconstructionMetricsUrl();
+  }
+  
+  static public void logRaidEncodingMetrics(
+      String result, Codec codec, long delay, 
+      long numReadBytes, long numReadBlocks,
+      long metaBlocks, long metaBytes, 
+      long savingBytes, Path srcPath, LOGTYPES type,
+      FileSystem fs) {
+    try {
+      JSONObject json = new JSONObject();
+      json.put("result", result);
+      json.put("code", codec.id);
+      json.put("delay", delay);
+      json.put("readbytes", numReadBytes);
+      json.put("readblocks", numReadBlocks);
+      json.put("metablocks", metaBlocks);
+      json.put("metabytes", metaBytes);
+      json.put("savingbytes", savingBytes);
+      json.put("path", srcPath.toString());
+      json.put("type", type.name());
+      json.put("cluster", fs.getUri().getAuthority());
+      ENCODER_METRICS_LOG.info(json.toString());
+    } catch(JSONException e) {
+      LOG.warn("Exception when logging the Raid metrics: " + e.getMessage(), 
+               e);
+    }
+  }
 
   public static void main(String argv[]) throws Exception {
     try {
-      Configuration.addDefaultResource("raid-site.xml");
       StringUtils.startupShutdownMessage(RaidNode.class, argv, LOG);
       RaidNode raid = createRaidNode(argv, null);
       if (raid != null) {

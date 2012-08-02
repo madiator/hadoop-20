@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FileStatus;
@@ -83,10 +84,56 @@ public class DirectoryStripeReader extends StripeReader {
   
   public static long getBlockNum(List<FileStatus> lfs) {
     long blockNum = 0L;
+    if (lfs == null) 
+      return blockNum;
     for (FileStatus fsStat: lfs) {
       blockNum += RaidNode.getNumBlocks(fsStat);
     }
     return blockNum;
+  }
+  
+  /**
+   * Get the total logical size in the directory
+   * @param lfs the Files under the directory
+   * @return
+   */
+  public static long getDirLogicalSize(List<FileStatus> lfs) {
+    long totalSize = 0L;
+    if (null == lfs) {
+      return totalSize;
+    }
+    
+    for (FileStatus fsStat : lfs) {
+      totalSize += fsStat.getLen();
+    }
+    return totalSize;
+  }
+  
+  /**
+   * Get the total physical size in the directory
+   * @param lfs the Files under the directory
+   * @return
+   */
+  public static long getDirPhysicalSize(List<FileStatus> lfs) {
+    long totalSize = 0L;
+    if (null == lfs) {
+      return totalSize;
+    }
+    
+    for (FileStatus fsStat : lfs) {
+      totalSize += fsStat.getLen() * fsStat.getReplication();
+    }
+    return totalSize;
+  }
+  
+  public static short getReplication(List<FileStatus> lfs) {
+    short maxRepl = 0;
+    for (FileStatus fsStat: lfs) {
+      if (fsStat.getReplication() > maxRepl) {
+        maxRepl = fsStat.getReplication();
+      }
+    }
+    return maxRepl;
   }
   
   public DirectoryStripeReader(Configuration conf, Codec codec,
@@ -152,6 +199,36 @@ public class DirectoryStripeReader extends StripeReader {
       RaidUtils.closeStreams(blocks);
       throw e;
     }
+  }
+  
+  public BlockLocation[] getNextStripeBlockLocations() throws IOException {
+    BlockLocation[] blocks = new BlockLocation[codec.stripeLength];
+    int startOffset = (int)curStripeIdx * codec.stripeLength;
+    int curFileIdx = this.stripeBlocks.get(startOffset).fileIdx;
+    FileStatus curFile = lfs.get(curFileIdx);
+    BlockLocation[] curBlocks = 
+        fs.getFileBlockLocations(curFile, 0, curFile.getLen());
+    for (int i = 0; i < codec.stripeLength; i++) {
+      if (startOffset + i < this.stripeBlocks.size()) {
+        BlockInfo bi = this.stripeBlocks.get(startOffset + i);
+        if (bi.fileIdx != curFileIdx) {
+          curFileIdx = bi.fileIdx;
+          curFile = lfs.get(curFileIdx);
+          curBlocks = 
+              fs.getFileBlockLocations(curFile, 0, curFile.getLen());
+        }
+        blocks[i] = curBlocks[bi.blockId];
+      } else {
+        // We have no src data at this offset.
+        blocks[i] = null; 
+      }
+    }
+    curStripeIdx++;
+    return blocks;
+  }
+  
+  public long getCurStripeIdx() {
+    return curStripeIdx;
   }
   
   @Override

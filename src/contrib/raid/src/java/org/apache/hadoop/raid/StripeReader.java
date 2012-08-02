@@ -45,9 +45,12 @@ public abstract class StripeReader {
   public static class LocationPair {
     private int stripeIdx;
     private int blockIdxInStripe;
-    public LocationPair(int stripeIdx, int blockIdxInStripe) {
+    private List<FileStatus> lfs;
+    public LocationPair(int stripeIdx, int blockIdxInStripe, 
+        List<FileStatus> lfs) {
       this.stripeIdx = stripeIdx;
       this.blockIdxInStripe = blockIdxInStripe;
+      this.lfs = lfs;
     }
     
     int getStripeIdx() {
@@ -56,6 +59,10 @@ public abstract class StripeReader {
     
     int getBlockIdxInStripe() {
       return blockIdxInStripe;
+    }
+    
+    List<FileStatus> getListFileStatus() {
+      return lfs;
     }
   }
   
@@ -155,10 +162,10 @@ public abstract class StripeReader {
     int stripeIdx = 0; 
     int blockIdxInStripe = 0;
     int blockIdx = blockIdxInFile; 
+    List<FileStatus> lfs = null;
     if (codec.isDirRaid) {
       Path parentPath = srcFile.getParent();
-      List<FileStatus> lfs = RaidNode.getDirectoryBlockLocations(conf,
-          srcFs, parentPath);
+      lfs = RaidNode.listDirectoryRaidFileStatus(conf, srcFs, parentPath);
       if (lfs == null) {
         throw new IOException("Couldn't list files under " + parentPath);
       }
@@ -176,20 +183,30 @@ public abstract class StripeReader {
     }
     stripeIdx = blockIdx / codec.stripeLength;
     blockIdxInStripe = blockIdx % codec.stripeLength; 
-    return new LocationPair(stripeIdx, blockIdxInStripe);
+    return new LocationPair(stripeIdx, blockIdxInStripe, lfs);
+  }
+  
+  public static LocationPair getParityBlockLocation(Codec codec, 
+      final int blockIdxInFile) {
+    
+    int stripeIdx = blockIdxInFile / codec.parityLength;
+    int blockIdxInStripe = blockIdxInFile % codec.parityLength;
+    
+    return new LocationPair(stripeIdx, blockIdxInStripe, null);
   }
   
   public static StripeReader getStripeReader(Codec codec, Configuration conf, 
-      long blockSize, FileSystem fs, long stripeIdx, Path srcFile,
-      long srcSize) throws IOException {
+      long blockSize, FileSystem fs, long stripeIdx, FileStatus srcStat)
+          throws IOException {
     if (codec.isDirRaid) {
+      Path srcDir = srcStat.isDir()? srcStat.getPath():
+        srcStat.getPath().getParent();
       return new DirectoryStripeReader(conf, codec, fs, stripeIdx,
-          srcFile.getParent(), 
-          RaidNode.getDirectoryBlockLocations(conf, fs,
-              srcFile.getParent())); 
+          srcDir, 
+          RaidNode.listDirectoryRaidFileStatus(conf, fs, srcDir)); 
     } else {
       return new FileStripeReader(conf, blockSize, 
-        codec, fs, stripeIdx, srcFile, srcSize);
+        codec, fs, stripeIdx, srcStat.getPath(), srcStat.getLen());
     }
   }
   

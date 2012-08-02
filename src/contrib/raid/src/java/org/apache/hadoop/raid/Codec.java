@@ -19,6 +19,7 @@
 package org.apache.hadoop.raid;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.IllegalArgumentException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +45,7 @@ import org.json.JSONObject;
  * 3. Parity directory location
  * 4. Codec priority
  */
-public class Codec {
+public class Codec implements Serializable {
 
   public static final Log LOG = LogFactory.getLog(Codec.class);
   
@@ -53,7 +54,7 @@ public class Codec {
   /**
    * Used by ErasureCode.init() to get Code specific extra parameters.
    */
-  public final JSONObject json;
+  public final String jsonStr;
 
   /**
    * id of the codec. Used by policy in raid.xml
@@ -139,6 +140,8 @@ public class Codec {
     try {
       Configuration.addDefaultResource("hdfs-default.xml");
       Configuration.addDefaultResource("hdfs-site.xml");
+      Configuration.addDefaultResource("raid-default.xml");
+      Configuration.addDefaultResource("raid-site.xml");
       initializeCodecs(new Configuration());
     } catch (Exception e) {
       LOG.fatal("Fail initialize Raid codecs", e);
@@ -152,32 +155,35 @@ public class Codec {
       if (source == null) {
         codecs = Collections.emptyList();
         idToCodec = Collections.emptyMap();
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("None Codec is specified");
+        }
         return;
       }
       JSONArray jsonArray = new JSONArray(source);
-      codecs = new ArrayList<Codec>();
-      idToCodec = new HashMap<String, Codec>();
+      List<Codec> localCodecs = new ArrayList<Codec>();
+      Map<String, Codec> localIdToCodec = new HashMap<String, Codec>();
       for (int i = 0; i < jsonArray.length(); ++i) {
         Codec codec = new Codec(jsonArray.getJSONObject(i));
-        idToCodec.put(codec.id, codec);
-        codecs.add(codec);
+        localIdToCodec.put(codec.id, codec);
+        localCodecs.add(codec);
       }
-      Collections.sort(codecs, new Comparator<Codec>() {
+      Collections.sort(localCodecs, new Comparator<Codec>() {
         @Override
         public int compare(Codec c1, Codec c2) {
           // Higher priority on top
           return c2.priority - c1.priority;
         }
       });
-      codecs = Collections.unmodifiableList(codecs);
-      idToCodec = Collections.unmodifiableMap(idToCodec);
+      codecs = Collections.unmodifiableList(localCodecs);
+      idToCodec = Collections.unmodifiableMap(localIdToCodec);
     } catch (JSONException e) {
       throw new IOException(e);
     }
   }
 
   private Codec(JSONObject json) throws JSONException {
-    this.json = json;
+    this.jsonStr = json.toString();
     this.id = json.getString("id");
     this.parityLength = json.getInt("parity_length");
     this.stripeLength = json.getInt("stripe_length");
@@ -235,10 +241,10 @@ public class Codec {
 
   @Override
   public String toString() {
-    if (json == null) {
+    if (jsonStr == null) {
       return "Test codec " + id;
     } else {
-      return json.toString();
+      return jsonStr;
     }
   }
   
@@ -287,7 +293,7 @@ public class Codec {
                 String tmpHarDirectory,
                 boolean isDirRaid,
                 boolean simulateBlockFix) {
-    this.json = null;
+    this.jsonStr = null;
     this.id = id;
     this.parityLength = parityLength;
     this.stripeLength = stripeLength;

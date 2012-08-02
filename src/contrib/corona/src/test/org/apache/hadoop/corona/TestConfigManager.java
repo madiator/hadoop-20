@@ -227,6 +227,29 @@ public class TestConfigManager extends TestCase {
     assertEquals(5000L, configManager.getPreemptedTaskMaxRunningTime());
   }
 
+  public void testRedirect() throws IOException {
+    FileWriter out = new FileWriter(CONFIG_FILE_PATH);
+    out.write("<?xml version=\"1.0\"?>\n");
+    out.write("<configuration>\n");
+    out.write("  <redirect source=\"source.pool_source\" " +
+        "destination=\"destination.pool_destination\" />\n");
+    // Shouldn't cause an issue
+    out.write("  <redirect source=\"\" " +
+        "destination=\"should.notwork\" />\n");
+    out.write("</configuration>\n");
+    out.close();
+
+    ConfigManager configManager = new ConfigManager(TYPES, conf);
+    PoolInfo sourcePoolInfo = new PoolInfo("source", "pool_source");
+    PoolInfo destinationPoolInfo = new PoolInfo("destination",
+        "pool_destination");
+    assertEquals(destinationPoolInfo,
+        configManager.getRedirect(destinationPoolInfo));
+    assertEquals(destinationPoolInfo,
+        configManager.getRedirect(sourcePoolInfo));
+    assertEquals(null, configManager.getRedirect(null));
+  }
+
   public void testReload() throws IOException, SAXException, ParserConfigurationException {
     FileWriter out = new FileWriter(CONFIG_FILE_PATH);
     out.write("<?xml version=\"1.0\"?>\n");
@@ -255,13 +278,21 @@ public class TestConfigManager extends TestCase {
       PoolsConfigDocumentGenerator {
     /** Changes over time */
     private int minMap = 10;
+    /** Fail? */
+    private boolean fail = false;
+
     @Override
     public void initialize(CoronaConf conf) {
+      fail = conf.getBoolean("test.fail", false);
       // Nothing to do here.
     }
 
     @Override
     public Document generatePoolsDocument() {
+      // Fake a failure?
+      if (fail == true) {
+        return null;
+      }
       minMap += 10;
       DocumentBuilderFactory documentBuilderFactory =
           DocumentBuilderFactory.newInstance();
@@ -307,5 +338,22 @@ public class TestConfigManager extends TestCase {
         configManager.getPoolGroupMinimum("testGroup", ResourceType.MAP);
     assert((changedMinMap % 10) == 0);
     assert(changedMinMap > minMap);
+  }
+
+  public void testFailPoolsConfigGenerator() throws InterruptedException {
+    conf.setClass(CoronaConf.POOLS_CONFIG_DOCUMENT_GENERATOR_PROPERTY,
+        TestPoolsConfigDocumentGenerator.class,
+        PoolsConfigDocumentGenerator.class);
+    conf.setLong(CoronaConf.POOLS_RELOAD_PERIOD_MS_PROPERTY, 100);
+    conf.setLong(CoronaConf.CONFIG_RELOAD_PERIOD_MS_PROPERTY, 100);
+    conf.setBoolean("test.fail", true);
+    try {
+      ConfigManager configManager = new ConfigManager(TYPES, conf);
+      // Should have thrown an exception
+      assertEquals(true, false);
+    } catch (IllegalStateException e) {
+      // Passed!
+      System.out.println("Got expected exception " + e.getMessage());
+    }
   }
 }

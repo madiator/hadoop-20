@@ -49,6 +49,8 @@ import org.apache.hadoop.hdfs.server.protocol.NamenodeProtocol;
 import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.ReceivedDeletedBlockInfo;
 import org.apache.hadoop.hdfs.server.protocol.UpgradeCommand;
+import org.apache.hadoop.hdfs.util.InjectionEvent;
+import org.apache.hadoop.hdfs.util.InjectionHandler;
 import org.apache.hadoop.http.HttpServer;
 import org.apache.hadoop.ipc.*;
 import org.apache.hadoop.conf.*;
@@ -421,6 +423,8 @@ public class NameNode extends ReconfigurableBase
     this.httpServer.addInternalServlet("data", "/data/*", FileDataServlet.class);
     this.httpServer.addInternalServlet("checksum", "/fileChecksum/*",
         FileChecksumServlets.RedirectServlet.class);
+    this.httpServer.addInternalServlet("namenodeMXBean", "/namenodeMXBean", 
+        NameNodeMXBeanServlet.class);
     httpServer.setAttribute(ReconfigurationServlet.
                             CONF_SERVLET_RECONFIGURABLE_PREFIX +
                             CONF_SERVLET_PATH, NameNode.this);
@@ -609,20 +613,17 @@ public class NameNode extends ReconfigurableBase
    */
   protected void stopRPC(boolean interruptClientHandlers) 
       throws IOException, InterruptedException {
-    // stop the emptier
-    if (emptier != null) {
-      emptier.interrupt();
-      emptier.join();
-    }
     // stop client handlers, 
     // waiting for the ongoing requests to complete
     if (server != null) {
+      LOG.info("stopRPC: Stopping client server");
       server.stop(interruptClientHandlers);
       server.waitForHandlers();
     }
     // stop datanode handlers, 
     // waiting for the ongoing requests to complete
     if (dnProtocolServer != null) {
+      LOG.info("stopRPC: Stopping datanode server");
       dnProtocolServer.stop(interruptClientHandlers);
       dnProtocolServer.waitForHandlers();
     }
@@ -768,6 +769,7 @@ public class NameNode extends ReconfigurableBase
         new PermissionStatus(FSNamesystem.getCurrentUGI().getUserName(),
             null, masked),
         clientName, clientMachine, overwrite, createParent, replication, blockSize);
+    InjectionHandler.processEventIO(InjectionEvent.NAMENODE_AFTER_CREATE_FILE);
     myMetrics.numFilesCreated.inc();
     myMetrics.numCreateFileOps.inc();
   }

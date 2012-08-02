@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.corona.ClusterManagerAvailabilityChecker;
 import org.apache.hadoop.corona.ClusterManagerService;
 import org.apache.hadoop.corona.ClusterNode;
 import org.apache.hadoop.corona.ClusterNodeInfo;
@@ -23,12 +24,12 @@ import org.apache.hadoop.corona.DisallowedNode;
 import org.apache.hadoop.corona.InetAddress;
 import org.apache.hadoop.corona.InvalidSessionHandle;
 import org.apache.hadoop.corona.ResourceType;
+import org.apache.hadoop.corona.SafeModeException;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.ipc.ProtocolSignature;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.ipc.RPC.Server;
 import org.apache.hadoop.mapreduce.TaskType;
-import org.apache.hadoop.net.DNS;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.util.DiskChecker.DiskErrorException;
 import org.apache.hadoop.util.ReflectionUtils;
@@ -66,8 +67,8 @@ public class CoronaTaskTracker extends TaskTracker
   InetSocketAddress actionServerAddr = null;
   ConcurrentHashMap<String, String> blacklistedSessions =
       new ConcurrentHashMap<String, String>();
-  private final long clusterHeartbeatInterval;
-  private long lastHeartbeat = 0;
+  private final long heartbeatCMInterval;
+  private volatile long lastCMHeartbeat = 0;
   Server actionServer;
   ConcurrentHashMap<JobID, JobTrackerReporter> jobTrackerReporters;
   long jtConnectTimeoutMsec = 0;
@@ -96,7 +97,7 @@ public class CoronaTaskTracker extends TaskTracker
     initializeTaskActionServer();
     initializeClusterManagerCallbackServer();
     initializeCleanupThreads();
-    clusterHeartbeatInterval = conf.getLong(HEART_BEAT_INTERVAL_KEY, 3000L);
+    heartbeatCMInterval = conf.getLong(HEART_BEAT_INTERVAL_KEY, 3000L);
     jtConnectTimeoutMsec = conf.getLong(JT_CONNECT_TIMEOUT_MSEC_KEY, 60000L);
   }
 
@@ -222,14 +223,15 @@ public class CoronaTaskTracker extends TaskTracker
    * Main service loop.  Will stay in this loop forever.
    */
   private void heartbeatToClusterManager() throws IOException {
+    CoronaConf coronaConf = new CoronaConf(fConf);
     int numCpu = resourceCalculatorPlugin.getNumProcessors();
     if (numCpu == ResourceCalculatorPlugin.UNAVAILABLE) {
       numCpu = 1;
     }
+    int totalMemoryMB = (int) (resourceCalculatorPlugin.getPhysicalMemorySize() / 1024D / 1024);
     ComputeSpecs total = new ComputeSpecs((short)numCpu);
     total.setNetworkMBps((short)100);
-    total.setMemoryMB(
-      (int)(resourceCalculatorPlugin.getPhysicalMemorySize() / 1024D / 1024));
+    total.setMemoryMB(totalMemoryMB);
     total.setDiskGB(
        (int)(getDiskSpace(false) / 1024D / 1024 / 1024));
     String appInfo = getLocalHostname() + ":" + actionServerAddr.getPort();
@@ -242,28 +244,24 @@ public class CoronaTaskTracker extends TaskTracker
     while (running && !shuttingDown) {
       try {
         long now = System.currentTimeMillis();
-
-        long waitTime = lastHeartbeat > 0 ?
-          clusterHeartbeatInterval - (now - lastHeartbeat) : 0;
-        if (waitTime > 0) {
-          Thread.sleep(waitTime);
-        }
+        Thread.sleep(heartbeatCMInterval);
 
         float cpuUsage = resourceCalculatorPlugin.getCpuUsage();
         if (cpuUsage == ResourceCalculatorPlugin.UNAVAILABLE) {
           cpuUsage = 0;
         }
-        ComputeSpecs used = new ComputeSpecs((short)(numCpu * cpuUsage / 100D));
-        used.setNetworkMBps((short)10);
-        used.setMemoryMB(
+        ComputeSpecs free = new ComputeSpecs((short)(numCpu * cpuUsage / 100D));
+        // TODO find free network.
+        free.setNetworkMBps((short)100);
+        int availableMemoryMB =
             (int)(resourceCalculatorPlugin.
-                  getAvailablePhysicalMemorySize() / 1024D / 1024));
-        used.setDiskGB(
-            (int)(getDiskSpace(true) / 1024D / 1024 / 1024));
+                getAvailablePhysicalMemorySize() / 1024D / 1024);
+        free.setMemoryMB(availableMemoryMB);
+        free.setDiskGB((int)(getDiskSpace(true) / 1024D / 1024 / 1024));
         // TT puts it's MR specific host:port tuple here
         ClusterNodeInfo node = new ClusterNodeInfo
           (this.getName(), clusterManagerCallbackServerAddr, total);
-        node.setUsed(used);
+        node.setFree(free);
         node.setResourceInfos(resourceInfos);
 
         LOG.debug("ClusterManager heartbeat: " + node.toString());
@@ -272,7 +270,7 @@ public class CoronaTaskTracker extends TaskTracker
         }
         client.nodeHeartbeat(node);
         clusterManagerConnectRetries = 0;
-        lastHeartbeat = System.currentTimeMillis();
+        lastCMHeartbeat = System.currentTimeMillis();
 
         markUnresponsiveTasks();
         killOverflowingTasks();
@@ -306,6 +304,17 @@ public class CoronaTaskTracker extends TaskTracker
             Thread.sleep(10000L);
           } catch (InterruptedException ie) {
           }
+          ClusterManagerAvailabilityChecker.
+            waitWhileClusterManagerInSafeMode(coronaConf);
+        }
+      } catch (SafeModeException e) {
+        LOG.info("Cluster Manager is in Safe Mode");
+        try {
+          ClusterManagerAvailabilityChecker.
+            waitWhileClusterManagerInSafeMode(coronaConf);
+        } catch (IOException ie) {
+          LOG.error("Could not wait while Cluster Manager is in Safe Mode ",
+                    ie);
         }
       }
     }
@@ -321,16 +330,18 @@ public class CoronaTaskTracker extends TaskTracker
     final RunningJob rJob;
     InterTrackerProtocol jobClient = null;
     boolean justInited = true;
-    long lastHeartbeat = -1;
+    long lastJTHeartbeat = -1;
     long previousCounterUpdate = -1;
-    long heartbeatInterval = 3000L;
+    long heartbeatJTInterval = 3000L;
     short heartbeatResponseId = -1;
     TaskTrackerStatus status = null;
+    final String name;
     JobTrackerReporter(RunningJob rJob, InetSocketAddress jobTrackerAddr,
         String sessionHandle) {
       this.rJob = rJob;
       this.jobTrackerAddr = jobTrackerAddr;
       this.sessionHandle = sessionHandle;
+      this.name = "JobTrackerReporter(" + rJob.getJobID() + ")";
     }
     volatile boolean shuttingDown = false;
     @Override
@@ -344,31 +355,25 @@ public class CoronaTaskTracker extends TaskTracker
             !CoronaTaskTracker.this.shuttingDown &&
             !this.shuttingDown) {
           long now = System.currentTimeMillis();
-          long waitTime = lastHeartbeat > 0 ?
-            heartbeatInterval - (now - lastHeartbeat) : 0;
-          if (waitTime > 0) {
-            // sleeps for the wait time or
-            // until there are empty slots to schedule tasks
-            synchronized (finishedCount) {
-              if (finishedCount.get() == 0) {
-                finishedCount.wait(waitTime);
-              }
-              finishedCount.set(0);
+          synchronized (finishedCount) {
+            if (finishedCount.get() == 0) {
+              finishedCount.wait(heartbeatJTInterval);
             }
+            finishedCount.set(0);
           }
           // If the reporter is just starting up, verify the buildVersion
           if(justInited) {
             String jobTrackerBV = jobClient.getBuildVersion();
             if(doCheckBuildVersion() &&
                 !VersionInfo.getBuildVersion().equals(jobTrackerBV)) {
-              String msg = "Shutting down. Incompatible buildVersion." +
+              String msg = name + " shutting down. Incompatible buildVersion." +
               "\nJobTracker's: " + jobTrackerBV +
               "\nTaskTracker's: "+ VersionInfo.getBuildVersion();
               LOG.error(msg);
               try {
                 jobClient.reportTaskTrackerError(taskTrackerName, null, msg);
               } catch(Exception e ) {
-                LOG.info("Problem reporting to jobtracker: " + e);
+                LOG.warn(name + " problem reporting to jobtracker: " + e);
               }
               shuttingDown = true;
               return;
@@ -376,6 +381,7 @@ public class CoronaTaskTracker extends TaskTracker
           }
 
           Collection<TaskInProgress> tipsInSession = new LinkedList<TaskInProgress>();
+          boolean doHeartbeat = false;
           synchronized (CoronaTaskTracker.this) {
             for (TaskTracker.TaskInProgress tip : runningTasks.values()) {
               CoronaSessionInfo info = (CoronaSessionInfo)(tip.getExtensible());
@@ -384,7 +390,8 @@ public class CoronaTaskTracker extends TaskTracker
               }
             }
             if (!tipsInSession.isEmpty() ||
-                now - lastHeartbeat > SLOW_HEARTBEAT_INTERVAL) {
+                now - lastJTHeartbeat > SLOW_HEARTBEAT_INTERVAL) {
+              doHeartbeat = true;
               // We need slow heartbeat to check if the JT is still alive
               boolean sendCounters = false;
               if (now > (previousCounterUpdate + COUNTER_UPDATE_INTERVAL)) {
@@ -395,12 +402,12 @@ public class CoronaTaskTracker extends TaskTracker
                   sendCounters, status, tipsInSession, jobTrackerAddr);
             }
           }
-          if (!tipsInSession.isEmpty()) {
+          if (doHeartbeat) {
             // Send heartbeat only when there is at least one running tip in
-            // this session
+            // this session, or we have reached the slow heartbeat interval.
 
-            LOG.info("JobTracker heartbeat:" + jobTrackerAddr.toString() +
-                " hearbeatId:" + heartbeatResponseId + " " + status.toString());
+            LOG.info(name + " heartbeat:" + jobTrackerAddr.toString() +
+              " hearbeatId:" + heartbeatResponseId + " " + status.toString());
 
             HeartbeatResponse heartbeatResponse = transmitHeartBeat(
                 jobClient, heartbeatResponseId, status);
@@ -409,12 +416,11 @@ public class CoronaTaskTracker extends TaskTracker
             // Force a rebuild of 'status' on the next iteration
             status = null;
             heartbeatResponseId = heartbeatResponse.getResponseId();
-            heartbeatInterval = heartbeatResponse.getHeartbeatInterval();
+            heartbeatJTInterval = heartbeatResponse.getHeartbeatInterval();
+            // Note the time when the heartbeat returned, use this to decide when to send the
+            // next heartbeat
+            lastJTHeartbeat = System.currentTimeMillis();
           }
-
-          // Note the time when the heartbeat returned, use this to decide when to send the
-          // next heartbeat
-          lastHeartbeat = System.currentTimeMillis();
 
           // resetting heartbeat interval from the response.
           justStarted = false;
@@ -422,26 +428,26 @@ public class CoronaTaskTracker extends TaskTracker
 
         }
       } catch (DiskErrorException de) {
-        String msg = "Exiting task tracker for disk error:\n" +
+        String msg = name + " exiting for disk error:\n" +
           StringUtils.stringifyException(de);
         LOG.error(msg);
         try {
           jobClient.reportTaskTrackerError(taskTrackerName,
               "DiskErrorException", msg);
         } catch (IOException exp) {
-          LOG.error("Cannot report TaskTracker failure");
+          LOG.error(name + " cannot report TaskTracker failure");
         }
       } catch (IOException e) {
-        LOG.error("Error report to JobTracker:" + jobTrackerAddr +
-            " sessionHandle:" + sessionHandle, e);
+        LOG.error(name + " error in reporting to " + jobTrackerAddr, e);
         // JobTracker is dead. Purge the job.
         // Or it will timeout this task.
         // Treat the task as killed
         purgeSession(this.sessionHandle);
       } catch (InterruptedException e) {
-        LOG.info("JobTrackerReporter interrupted");
+        LOG.info(name + " interrupted");
       }
     }
+
     private void connect() throws IOException {
       try {
         jobClient = RPC.waitForProtocolProxy(
@@ -452,13 +458,12 @@ public class CoronaTaskTracker extends TaskTracker
             jtConnectTimeoutMsec).getProxy();
         rJob.setJobClient(jobClient);
       } catch (IOException e) {
-        LOG.error("Failed to connect to JobTracker:" +
-            jobTrackerAddr + " sessionHandle:" + sessionHandle, e);
+        LOG.error(name + " failed to connect to " + jobTrackerAddr, e);
         throw e;
       }
     }
     public void shutdown() {
-      LOG.info("Shutting down reporter to JobTracker " + this.jobTrackerAddr);
+      LOG.info(name + " shutting down");
       // shutdown RPC connections
       RPC.stopProxy(jobClient);
       shuttingDown = true;
@@ -467,7 +472,7 @@ public class CoronaTaskTracker extends TaskTracker
 
   @Override
   public Boolean isAlive() {
-    long timeSinceHeartbeat = System.currentTimeMillis() - lastHeartbeat;
+    long timeSinceHeartbeat = System.currentTimeMillis() - lastCMHeartbeat;
     CoronaConf cConf = new CoronaConf(fConf);
     long expire = cConf.getNodeExpiryInterval();
     if (timeSinceHeartbeat > expire) {
@@ -612,6 +617,7 @@ public class CoronaTaskTracker extends TaskTracker
     RunningJob rJob = new RunningJob(jobId, null, info);
     JobTrackerReporter reporter = new JobTrackerReporter(
         rJob, info.getJobTrackerAddr(), info.getSessionHandle());
+    reporter.setName("JobTrackerReporter for " + jobId);
     // Start the heartbeat to the jobtracker
     reporter.start();
     jobTrackerReporters.put(jobId, reporter);

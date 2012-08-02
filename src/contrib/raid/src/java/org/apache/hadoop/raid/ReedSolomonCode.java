@@ -18,6 +18,7 @@
 
 package org.apache.hadoop.raid;
 
+import java.util.Arrays;
 import java.util.Set;
 
 import com.sun.org.apache.commons.logging.Log;
@@ -94,6 +95,34 @@ public class ReedSolomonCode extends ErasureCode {
       parity[i] = dataBuff[i];
     }
   }
+  
+  /**
+   * This function (actually, the GF.remainder() function) will modify
+   * the "inputs" parameter.
+   */
+  @Override
+  public void encodeBulk(byte[][] inputs, byte[][] outputs) {
+    final int stripeSize = stripeSize();
+    final int paritySize = paritySize();
+    assert (stripeSize == inputs.length);
+    assert (paritySize == outputs.length);
+    
+    for (int i = 0; i < outputs.length; i++) {
+      Arrays.fill(outputs[i], (byte)0);
+    }
+    
+    byte[][] data = new byte[stripeSize + paritySize][];
+
+    for (int i = 0; i < paritySize; i++) {
+      data[i] = outputs[i];
+    }
+    for (int i = 0; i < stripeSize; i++) {
+      data[i + paritySize] = inputs[i];
+    }
+    
+    // Compute the remainder
+    GF.remainder(data, generatingPolynomial);
+  }
 
 
   @Override
@@ -137,6 +166,26 @@ public class ReedSolomonCode extends ErasureCode {
         }
       }
     }
+  }
+  
+  @Override
+  public void decodeBulk(byte[][] readBufs, byte[][] writeBufs, 
+                               int[] erasedLocation) {
+    if (erasedLocation.length == 0) {
+      return;
+    }
+    
+    // cleanup the write buffer
+    for (int i = 0; i < writeBufs.length; i++) {
+      Arrays.fill(writeBufs[i], (byte)0);
+    }
+    
+    for (int i = 0; i < erasedLocation.length; i++) {
+      errSignature[i] = primitivePower[erasedLocation[i]];
+      GF.substitute(readBufs, writeBufs[i], primitivePower[i]);
+    }
+    GF.solveVandermondeSystem(errSignature, writeBufs, erasedLocation.length, 
+        readBufs[0].length);
   }
 
 

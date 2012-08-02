@@ -118,9 +118,10 @@ class INodeFileUnderConstruction extends INodeFile {
   }
 
   /**
-   * add this target if it does not already exists
+   * add this target if it does not already exists. Returns true if the target
+   * was added.
    */
-  void addTarget(DatanodeDescriptor node) {
+  boolean addTarget(DatanodeDescriptor node) {
 
     if (this.targets == null) {
       this.targets = new DatanodeDescriptor[0];
@@ -128,7 +129,7 @@ class INodeFileUnderConstruction extends INodeFile {
 
     for (int j = 0; j < this.targets.length; j++) {
       if (this.targets[j].equals(node)) {
-        return;  // target already exists
+        return false; // target already exists
       }
     }
     
@@ -144,6 +145,7 @@ class INodeFileUnderConstruction extends INodeFile {
     newt[targets.length] = node;
     this.targets = newt;
     this.primaryNodeIndex = -1;
+    return true;
   }
 
   void removeTarget(DatanodeDescriptor node) {
@@ -213,11 +215,14 @@ class INodeFileUnderConstruction extends INodeFile {
     System.arraycopy(blocks, 0, newlist, 0, size_1);
     blocks = newlist;
 
-    for (DatanodeDescriptor datenode : targets) {
-      datenode.removeINode(this);
+    if (targets != null) {
+      for (DatanodeDescriptor datanode : targets) {
+        datanode.removeINode(this);
+      }
     }
+
     // Remove the block locations for the last block.
-     targets = null;
+    targets = null;
   }
 
   synchronized void setLastBlock(BlockInfo newblock, DatanodeDescriptor[] newtargets

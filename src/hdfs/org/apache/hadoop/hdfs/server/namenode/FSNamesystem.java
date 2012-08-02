@@ -48,6 +48,7 @@ import org.apache.hadoop.net.NodeBase;
 import org.apache.hadoop.net.ScriptBasedMapping;
 import org.apache.hadoop.hdfs.server.namenode.LeaseManager.Lease;
 import org.apache.hadoop.hdfs.server.namenode.UnderReplicatedBlocks.BlockIterator;
+import org.apache.hadoop.hdfs.server.protocol.BlockAlreadyCommittedException;
 import org.apache.hadoop.hdfs.server.protocol.BlockCommand;
 import org.apache.hadoop.hdfs.server.protocol.BlockReport;
 import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations;
@@ -1864,15 +1865,14 @@ public class FSNamesystem extends ReconfigurableBase
         checkPathAccess(src, inodes, FsAction.WRITE);
       }
 
-      recoverLeaseInternal(inode, src, holder, clientMachine,
+      return recoverLeaseInternal(inode, src, holder, clientMachine,
                            true, discardLastBlock);
-      return false;
     } finally {
       writeUnlock();
     }
   }
 
-  private void recoverLeaseInternal(INode fileInode,
+  private boolean recoverLeaseInternal(INode fileInode,
       String src, String holder, String clientMachine, boolean force,
       boolean discardLastBlock)
   throws IOException {
@@ -1912,7 +1912,9 @@ public class FSNamesystem extends ReconfigurableBase
         LOG.info("recoverLease: recover lease " + lease + ", src=" + src +
                  " from client " + pendingFile.clientName +
                  " discardLastBloc = " + discardLastBlock);
-        internalReleaseLeaseOne(lease, src, pendingFile, discardLastBlock);
+        // We have to tell the client that the lease recovery has succeeded e.g. in case the file
+        // has no blocks. Otherwise, the client will get stuck in an infinite loop.
+        return internalReleaseLeaseOne(lease, src, pendingFile, discardLastBlock);
       } else {
         //
         // If the original holder has not renewed in the last SOFTLIMIT
@@ -1931,6 +1933,9 @@ public class FSNamesystem extends ReconfigurableBase
             " on " + pendingFile.getClientMachine());
       }
     }
+    // This does not necessarily mean lease recovery has failed, but we will
+    // have the client retry.
+    return false;
   }
 
   /** 
@@ -1970,7 +1975,7 @@ public class FSNamesystem extends ReconfigurableBase
         Block last = blocks[blocks.length - 1];
         BlockInfo storedBlock = blocksMap.getStoredBlock(last);
         if (file.getPreferredBlockSize() > storedBlock.getNumBytes()) {
-          long fileLength = file.computeContentSummary().getLength();
+          long fileLength = file.computeContentSummary().getLength();          
           DatanodeDescriptor[] targets = new DatanodeDescriptor[blocksMap.numNodes(last)];
           Iterator<DatanodeDescriptor> it = blocksMap.nodeIterator(last);
           for (int i = 0; it != null && it.hasNext(); i++) {
@@ -3426,12 +3431,14 @@ public class FSNamesystem extends ReconfigurableBase
    *
    * @param src   The filename
    * @param lease The lease for the client creating the file
+   * @return true if lease recovery has completed, false if the client has to retry
    */
-  void internalReleaseLeaseOne(Lease lease, String src,
+  boolean internalReleaseLeaseOne(Lease lease, String src,
         INodeFileUnderConstruction pendingFile, boolean discardLastBlock) throws IOException {
     // if it is safe to discard the last block, then do so
     if (discardLastBlock && discardDone(pendingFile, src)) {
-      return;
+      // Have client retry lease recovery.
+      return false;
     }
 
     // Initialize lease recovery for pendingFile. If there are no blocks
@@ -3443,7 +3450,8 @@ public class FSNamesystem extends ReconfigurableBase
         finalizeINodeFileUnderConstruction(src, pendingFile);
         NameNode.stateChangeLog.warn("BLOCK*"
           + " internalReleaseLease: No blocks found, lease removed for " +  src);
-        return;
+        // Tell the client that lease recovery has succeeded.
+        return true;
       }
       // setup the Inode.targets for the last block from the blocksMap
       //
@@ -3464,6 +3472,7 @@ public class FSNamesystem extends ReconfigurableBase
     );
     getEditLog().logOpenFile(src, pendingFile);
     leaseManager.renewLease(reassignedLease);
+    return false;  // Have the client retry lease recovery.
   }
 
   // If we are part of recoverLease call and no fsync has
@@ -4962,8 +4971,12 @@ public class FSNamesystem extends ReconfigurableBase
 
         INodeFileUnderConstruction pendingFile = 
                             (INodeFileUnderConstruction)inode;
-        pendingFile.addTarget(dataNode);
-        incrementSafeBlockCount(pendingFile.getTargets().length, true);
+        boolean added = pendingFile.addTarget(dataNode);
+        if (!dataNode.isDecommissioned()
+            && !dataNode.isDecommissionInProgress() && added) {
+          // Increment only once for each datanode.
+          incrementSafeBlockCount(pendingFile.getTargets().length, true);
+        }
       }
     } finally {
       checkSafeMode();
@@ -5273,24 +5286,6 @@ public class FSNamesystem extends ReconfigurableBase
             LOG.warn("Error in deleting bad block " + block + e);
           }
         }
-
-        //Updated space consumed if required.
-        long diff = (file == null) ? 0 :
-          (file.getPreferredBlockSize() - storedBlock.getNumBytes());
-
-        if (diff > 0 && file.isUnderConstruction() &&
-          cursize < storedBlock.getNumBytes()) {
-          try {
-            // get all the inodes on the path
-            INode[] inodes = FSDirectory.getINodeArray(file);
-            INodeFileUnderConstruction cons = (INodeFileUnderConstruction) file;
-            dir.updateSpaceConsumed(cons.getFullPathName(),
-                inodes, 0, -diff * file.getReplication());
-          } catch (IOException e) {
-            LOG.warn("Unexpected exception while updating disk space : " +
-              e.getMessage());
-          }
-        }
       }
       block = storedBlock;
     } else {
@@ -5475,7 +5470,7 @@ public class FSNamesystem extends ReconfigurableBase
           continue;
         }
         // If this is a last block of a file under construction ignore it.
-        if (fileINode.getLastBlock().equals(block)
+        if (block.equals(fileINode.getLastBlock())
             && fileINode.isUnderConstruction()) {
           continue;
         }
@@ -6118,38 +6113,6 @@ public class FSNamesystem extends ReconfigurableBase
   public String getRaidHttpUrl() {
     return this.getConf().get(
         FSConstants.DFS_RAIDNODE_HTTP_ADDRESS_KEY, null);
-  }
-  
-  /*
-   * Connect to the raidnode to get the corrupt file HTML information
-   */
-  public String getCorruptFileHTMLInfo(String raidHttpUrl) throws IOException {
-    // Connect to the raid node
-    final StringBuffer url = new StringBuffer("http://"+raidHttpUrl+"/corruptfilecounter");
-    InputStream stream = null;
-    URL path = new URL(url.toString());
-    LOG.info("Connect to " + url.toString());
-    URLConnection connection = path.openConnection();
-    stream = connection.getInputStream();
-    BufferedReader input = new BufferedReader(
-        new InputStreamReader(stream));
-    StringBuilder sb = new StringBuilder();
-    String line = null;
-    try {
-      while (true) {
-        line = input.readLine();
-        if (line == null) {
-          break;
-        }
-        sb.append(line + "\n");
-      }
-      return sb.toString();
-    } catch (IOException e) {
-      LOG.error("Error to get the corrupt file information", e);
-      throw e;
-    } finally {
-      input.close();
-    }
   }
 
   long[] getStats() throws IOException {
@@ -7429,13 +7392,13 @@ public class FSNamesystem extends ReconfigurableBase
       if (storedBlock == null) {
         String msg = block + " is already commited, storedBlock == null.";
         LOG.info(msg);
-        throw new IOException(msg);
+        throw new BlockAlreadyCommittedException(msg);
       }
       INodeFile fileINode = storedBlock.getINode();
       if (!fileINode.isUnderConstruction()) {
         String msg = block + " is already commited, !fileINode.isUnderConstruction().";
         LOG.info(msg);
-        throw new IOException(msg);
+        throw new BlockAlreadyCommittedException(msg);
       }
       // Disallow client-initiated recovery once
       // NameNode initiated lease recovery starts
@@ -8118,9 +8081,43 @@ public class FSNamesystem extends ReconfigurableBase
     return getNameNode().getNameNodeSpecificKeys();
   }
   
+  public Map<String, String> getJsonFriendlyNNSpecificKeys() {
+    Map<String, String> clone = new HashMap<String, String>();
+    Map<NameNodeKey, String> original = this.getNNSpecificKeys();
+    for (NameNodeKey nnk : original.keySet()) {
+      clone.put(nnk.toString(), original.get(nnk));
+    }
+    return clone;
+  }
+  
   @Override // NameNodeMXBean
   public boolean getIsPrimary() {
     return getNameNode().getIsPrimary();
+  }
+  
+  public String getNameNodeStatus() {
+    Map<String, Object> result = new HashMap<String, Object>();
+    result.put(ClusterJspHelper.TOTAL_FILES,
+        Long.toString(this.getTotalFiles()));
+    result.put(ClusterJspHelper.TOTAL, Long.toString(this.getTotal()));
+    result.put(ClusterJspHelper.FREE, Long.toString(this.getFree()));
+    result.put(ClusterJspHelper.NAMESPACE_USED,
+        Long.toString(this.getNamespaceUsed()));
+    result.put(ClusterJspHelper.NON_DFS_USEDSPACE,
+        Long.toString(this.getNonDfsUsedSpace()));
+    result.put(ClusterJspHelper.TOTAL_BLOCKS,
+        Long.toString(this.getTotalBlocks()));
+    result.put(ClusterJspHelper.NUMBER_MISSING_BLOCKS,
+        Long.toString(this.getNumberOfMissingBlocks()));
+    result.put(ClusterJspHelper.SAFE_MODE_TEXT, this.getSafeModeText());
+    result.put(ClusterJspHelper.LIVE_NODES, this.getLiveNodes());
+    result.put(ClusterJspHelper.DEAD_NODES, this.getDeadNodes());
+    result.put(ClusterJspHelper.DECOM_NODES, this.getDecomNodes());
+    result.put(ClusterJspHelper.NNSPECIFIC_KEYS,
+        JSON.toString(this.getJsonFriendlyNNSpecificKeys()));
+    result.put(ClusterJspHelper.IS_PRIMARY,
+        Boolean.toString(this.getIsPrimary()));
+    return JSON.toString(result);
   }
   
   /**
@@ -8204,7 +8201,7 @@ public class FSNamesystem extends ReconfigurableBase
   }
   
   /** Re-populate the namespace and diskspace count of every node with quota */
-  void recount() throws IOException {
+  void recount() {
     writeLock();
     try {
       dir.updateCountForINodeWithQuota();

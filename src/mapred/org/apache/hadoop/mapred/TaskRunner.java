@@ -44,6 +44,8 @@ abstract class TaskRunner extends Thread {
   /** Should the user classpath be added first? */
   public static final String MAPREDUCE_JOB_USER_CLASSPATH_FIRST =
       "mapreduce.job.user.classpath.first";
+  public static final String MAPREDUCE_TASK_SYSTEM_CLASSPATH_PROPERTY =
+      "MAPREDUCE_TASK_SYSTEM_CLASSPATH";
   volatile boolean killed = false;
   private TaskTracker.TaskInProgress tip;
   private Task t;
@@ -206,8 +208,17 @@ abstract class TaskRunner extends Thread {
       classPath.append(debugRuntime);
       classPath.append(pathSeparator);
     }
-    // start with same classpath as parent process
-    classPath.append(System.getProperty("java.class.path"));
+    // Determine system classpath for tasks. Default to tasktracker's
+    // classpath.
+    String systemClasspath = System.getenv(
+      MAPREDUCE_TASK_SYSTEM_CLASSPATH_PROPERTY);
+    if (systemClasspath == null) {
+      systemClasspath = System.getProperty("java.class.path");
+    }
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("System classpath " + systemClasspath);
+    }
+    classPath.append(systemClasspath);
     classPath.append(pathSeparator);
   }
 
@@ -585,12 +596,12 @@ abstract class TaskRunner extends Thread {
       vargs.add("-Dhadoop.tasklog.taskid=" + taskid);
       vargs.add("-Dhadoop.tasklog.totalLogFileSize=" + logSize);
 
-      if (conf.getProfileEnabled()) {
-        if (conf.getProfileTaskRange(t.isMapTask()
-                                     ).isIncluded(t.getPartition())) {
-          File prof = TaskLog.getTaskLogFile(taskid, TaskLog.LogName.PROFILE);
-          vargs.add(String.format(conf.getProfileParams(), prof.toString()));
-        }
+      boolean shouldProfile = (tracker.getProfileAllTasks() ||
+        (conf.getProfileEnabled() &&
+          conf.getProfileTaskRange(t.isMapTask()).isIncluded(t.getPartition())));
+      if (shouldProfile) {
+        File prof = TaskLog.getTaskLogFile(taskid, TaskLog.LogName.PROFILE);
+        vargs.add(String.format(conf.getProfileParams(), prof.toString()));
       }
 
       // Add main class and its arguments

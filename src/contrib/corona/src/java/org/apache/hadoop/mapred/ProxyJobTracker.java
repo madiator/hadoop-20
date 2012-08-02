@@ -25,8 +25,10 @@ import java.io.InputStream;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
+import java.net.ServerSocket;
 import java.net.URLEncoder;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.Map;
 
 import javax.servlet.ServletException;
@@ -43,7 +45,9 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.corona.CoronaConf;
 import org.apache.hadoop.corona.SessionHistoryManager;
+import org.apache.hadoop.corona.TFactoryBasedThreadPoolServer;
 import org.apache.hadoop.corona.Utilities;
+import org.apache.hadoop.corona.CoronaProxyJobTrackerService;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.http.HttpServer;
@@ -57,6 +61,7 @@ import org.apache.hadoop.metrics.MetricsUtil;
 import org.apache.hadoop.metrics.Updater;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.util.StringUtils;
+import org.apache.thrift.server.TServer;
 
 /**
  * This is used to proxy HTTP requests to individual Corona Job Tracker web
@@ -64,7 +69,8 @@ import org.apache.hadoop.util.StringUtils;
  * Also used for aggregating information about jobs such as job counters.
  */
 public class ProxyJobTracker implements
-  JobHistoryObserver, CoronaJobAggregator, Updater {
+  JobHistoryObserver, CoronaJobAggregator, Updater,
+  CoronaProxyJobTrackerService.Iface {
   /** Logger. */
   private static final Log LOG = LogFactory.getLog(ProxyJobTracker.class);
 
@@ -98,10 +104,40 @@ public class ProxyJobTracker implements
   private Counters aggregateCounters = new Counters();
   /** Aggregate job stats. */
   private JobStats aggregateJobStats = new JobStats();
+  /** Job Counters aggregated by pool */
+  private Map<String, Counters> poolToJobCounters =
+    new HashMap<String, Counters>();
+  /** Job Stats aggregated by pool */
+  private Map<String, JobStats> poolToJobStats =
+    new HashMap<String, JobStats>();
   /** Metrics context. */
   private MetricsContext context;
   /** Metrics record. */
   private MetricsRecord metricsRecord;
+  /** Is the Cluster Manager in Safe Mode? */
+  private volatile boolean clusterManagerSafeMode;
+  /** Metrics Record for pools */
+  private Map<String, MetricsRecord> poolToMetricsRecord =
+    new HashMap<String, MetricsRecord>();
+  /* This is the thrift server thread */
+  private TServerThread server;
+
+  /* The thrift server thread class */
+  public class TServerThread extends Thread {
+    private TServer server;
+
+    public TServerThread(TServer server) {
+      this.server = server;
+    }
+
+    public void run() {
+      try {
+        server.serve();
+      } catch (Exception e) {
+        LOG.info("Got an exception: ", e);
+      }
+    }
+  }
 
   @Override
   public void doUpdates(MetricsContext unused) {
@@ -109,23 +145,39 @@ public class ProxyJobTracker implements
       // Update metrics with aggregate job stats and reset the aggregate.
       aggregateJobStats.incrementMetricsAndReset(metricsRecord);
 
-      // Now update metrics with the counters and reset the aggregate.
-      for (Counters.Group group : aggregateCounters) {
-        String groupName = group.getName();
-        for (Counter counter : group) {
-          String name = groupName + "_" + counter.getName();
-          name = name.replaceAll("[^a-zA-Z_]", "_").toLowerCase();
-          metricsRecord.incrMetric(name, counter.getValue());
-        }
-      }
-      // Reset the aggregate counters.
-      for (Counters.Group g : aggregateCounters) {
-        for (Counter c : g) {
-          c.setValue(0);
-        }
+      incrementMetricsAndReset(metricsRecord, aggregateCounters);
+
+      for (Map.Entry<String, MetricsRecord> entry :
+        poolToMetricsRecord.entrySet()) {
+        String pool = entry.getKey();
+
+        JobStats poolJobStats = poolToJobStats.get(pool);
+        poolJobStats.incrementMetricsAndReset(entry.getValue());
+
+        Counters poolCounters = poolToJobCounters.get(pool);
+        incrementMetricsAndReset(entry.getValue(), poolCounters);
       }
     }
-    metricsRecord.update();
+  }
+
+  private static void incrementMetricsAndReset(
+    MetricsRecord record, Counters counters) {
+    // Now update metrics with the counters and reset the aggregate.
+    for (Counters.Group group : counters) {
+      String groupName = group.getName();
+      for (Counter counter : group) {
+        String name = groupName + "_" + counter.getName();
+        name = name.replaceAll("[^a-zA-Z_]", "_").toLowerCase();
+        record.incrMetric(name, counter.getValue());
+      }
+    }
+    // Reset the aggregate counters.
+    for (Counters.Group g : counters) {
+      for (Counter c : g) {
+        c.setValue(0);
+      }
+    }
+    record.update();
   }
 
   /**
@@ -409,6 +461,22 @@ public class ProxyJobTracker implements
 
     sessionHistoryManager = new SessionHistoryManager();
     sessionHistoryManager.setConf(conf);
+
+    try {
+      String target = conf.getProxyJobTrackerThriftAddress();
+      InetSocketAddress addr = NetUtils.createSocketAddr(target);
+      LOG.info("Trying to start the Thrift Server at: " + target);
+      ServerSocket serverSocket = new ServerSocket(addr.getPort());
+      server = new TServerThread(
+        TFactoryBasedThreadPoolServer.createNewServer(
+          new CoronaProxyJobTrackerService.Processor(this),
+          serverSocket,
+          5000));
+      server.start();
+      LOG.info("Thrift server started on: " + target);
+    } catch (IOException e) {
+      LOG.info("Exception while starting the Thrift Server on CPJT: ", e);
+    }
   }
 
   @Override
@@ -416,19 +484,46 @@ public class ProxyJobTracker implements
     String jobId, String pool, JobStats stats, Counters counters) {
     synchronized (aggregateJobStats) {
       aggregateJobStats.accumulate(stats);
-      for (JobInProgress.Counter key : JobInProgress.Counter.values()) {
-        aggregateCounters.findCounter(key).
-          increment(counters.findCounter(key).getValue());
+      JobStats poolJobStats = poolToJobStats.get(pool);
+      if (poolJobStats == null) {
+        poolJobStats = new JobStats();
+        poolToJobStats.put(pool, poolJobStats);
       }
-      for (Task.Counter key : Task.Counter.values()) {
-        aggregateCounters.findCounter(key).
-          increment(counters.findCounter(key).getValue());
+      poolJobStats.accumulate(stats);
+
+      accumulateCounters(aggregateCounters, counters);
+      Counters poolCounters = poolToJobCounters.get(pool);
+      if (poolCounters == null) {
+        poolCounters = new Counters();
+        poolToJobCounters.put(pool, poolCounters);
       }
-      for (Counters.Counter counter :
-        counters.getGroup(Task.FILESYSTEM_COUNTER_GROUP)) {
-        aggregateCounters.incrCounter(
-          Task.FILESYSTEM_COUNTER_GROUP, counter.getName(), counter.getValue());
+      accumulateCounters(poolCounters, counters);
+
+      if (!poolToMetricsRecord.containsKey(pool)) {
+        MetricsRecord poolRecord = context.createRecord("pool-" + pool);
+        poolToMetricsRecord.put(pool, poolRecord);
       }
+    }
+  }
+
+  private static void accumulateCounters(
+    Counters aggregate, Counters increment) {
+    for (JobInProgress.Counter key : JobInProgress.Counter.values()) {
+      Counter counter = increment.findCounter(key);
+      if (counter != null) {
+        aggregate.findCounter(key).increment(counter.getValue());
+      }
+    }
+    for (Task.Counter key : Task.Counter.values()) {
+      Counter counter = increment.findCounter(key);
+      if (counter != null) {
+        aggregate.findCounter(key).increment(counter.getValue());
+      }
+    }
+    for (Counters.Counter counter :
+      increment.getGroup(Task.FILESYSTEM_COUNTER_GROUP)) {
+      aggregate.incrCounter(
+        Task.FILESYSTEM_COUNTER_GROUP, counter.getName(), counter.getValue());
     }
   }
 
@@ -451,9 +546,24 @@ public class ProxyJobTracker implements
       this, protocol, clientVersion, clientMethodsHash);
   }
 
+  // Used by the CM to tell the CPJT if it's in Safe Mode.
+  @Override
+  public void setClusterManagerSafeModeFlag(boolean safeMode) {
+    clusterManagerSafeMode = safeMode;
+    LOG.info("On ProxyJobTracker, clusterManagerSafeModeFlag: " +
+      clusterManagerSafeMode);
+  }
+
+  // Has the CM gone into Safe Mode and told the CPJT about it?
+  @Override
+  public boolean getClusterManagerSafeModeFlag() {
+    return clusterManagerSafeMode;
+  }
+
   public void join() throws InterruptedException {
     infoServer.join();
     rpcServer.join();
+    server.join();
   }
 
   public static ProxyJobTracker startProxyTracker(CoronaConf conf)

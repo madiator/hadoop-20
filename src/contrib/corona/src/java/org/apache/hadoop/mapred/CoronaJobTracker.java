@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.corona.CoronaClient;
 import org.apache.hadoop.corona.InetAddress;
 import org.apache.hadoop.corona.CoronaConf;
 import org.apache.hadoop.corona.PoolInfo;
@@ -40,6 +41,7 @@ import org.apache.hadoop.corona.ResourceRequest;
 import org.apache.hadoop.corona.ResourceType;
 import org.apache.hadoop.corona.SessionDriver;
 import org.apache.hadoop.corona.SessionDriverService;
+import org.apache.hadoop.corona.SessionHistoryManager;
 import org.apache.hadoop.corona.SessionPriority;
 import org.apache.hadoop.corona.SessionStatus;
 import org.apache.hadoop.corona.Utilities;
@@ -138,6 +140,23 @@ public class CoronaJobTracker extends JobTrackerTraits
   public static final String SYSTEM_DIR_KEY = "corona.system.dir";
   /** Default corona system directory. */
   public static final String DEFAULT_SYSTEM_DIR = "/tmp/hadoop/mapred/system";
+  /** Number of handlers used by the RPC server.*/
+  public static final String RPC_SERVER_HANDLER_COUNT =
+    "mapred.job.tracker.handler.count";
+  /**
+   * The number of handlers used by the RPC server in
+   * standalone mode. The standalone mode is used for large jobs, so should
+   * use more threads.
+   */
+  public static final String RPC_SERVER_HANDLER_COUNT_STANDALONE =
+     "mapred.coronajobtracker.remote.thread.standalone";
+
+  /**
+   * If a remote JT is running, stop the local RPC server after this timeout
+   * past the completion of the job.
+   */
+  public static final String RPC_SERVER_STOP_TIMEOUT =
+    "mapred.coronajobtracker.rpcserver.stop.timeout";
 
   /** Logger. */
   private static final Log LOG = LogFactory.getLog(CoronaJobTracker.class);
@@ -166,7 +185,7 @@ public class CoronaJobTracker extends JobTrackerTraits
   /** Will always be 1. */
   private AtomicInteger jobCounter = new AtomicInteger();
   /** Identifier for the current job. */
-  private final JobID jobId;
+  private JobID jobId;
   /** The job. */
   private CoronaJobInProgress job;
   /** The grants to revoke. */
@@ -578,12 +597,14 @@ public class CoronaJobTracker extends JobTrackerTraits
     this.conf = conf;
     this.trackerStats = new TrackerStats(conf);
     this.fs = FileSystem.get(conf);
+  }
 
-    createSession();
+  public static JobID jobIdFromSessionId(String sessionId) {
+    return new JobID(sessionId, 1);
+  }
 
-    // the jobtracker can run only a single job. it's jobid is fixed based
-    // on the sessionId.
-    this.jobId = new JobID(sessionId, 1);
+  public static String sessionIdFromJobID(JobID jobId) {
+    return jobId.getJtIdentifier();
   }
 
   private void failTask(TaskAttemptID taskId, String reason,
@@ -610,7 +631,7 @@ public class CoronaJobTracker extends JobTrackerTraits
     TaskStatus.Phase phase =
       tip.isMapTask() ? TaskStatus.Phase.MAP : TaskStatus.Phase.STARTING;
     CoronaJobTracker.this.job.failedTask(
-        tip, taskId, reason, phase, isFailed, trackerName, trackerStatus);
+      tip, taskId, reason, phase, isFailed, trackerName, trackerStatus);
   }
 
   public SessionDriver getSessionDriver() {
@@ -657,7 +678,20 @@ public class CoronaJobTracker extends JobTrackerTraits
 
     taskLauncher = new CoronaTaskLauncher(conf, this, expireTasks);
 
-    String sessionLogPath = sessionDriver.getSessionLog();
+    String sessionLogPath = null;
+    if (isStandalone) {
+      // If this is the remote job tracker, we need to use the session log
+      // path of the parent job tracker, since we use the job ID specified
+      // by the parent job tracker.
+      String parentSessionId = CoronaJobTracker.sessionIdFromJobID(jobId);
+      SessionHistoryManager sessionHistoryManager = new SessionHistoryManager();
+      sessionHistoryManager.setConf(conf);
+      sessionLogPath = sessionHistoryManager.getLogPath(parentSessionId);
+      LOG.info("Using session log path " + sessionLogPath + " based on jobId " +
+        jobId);
+    } else {
+      sessionLogPath = sessionDriver.getSessionLog();
+    }
     jobHistory = new CoronaJobHistory(conf, jobId, sessionLogPath);
 
     // Initialize history DONE folder
@@ -684,7 +718,10 @@ public class CoronaJobTracker extends JobTrackerTraits
     if (interTrackerServer != null) {
       return;
     }
-    int handlerCount = conf.getInt("mapred.job.tracker.handler.count", 10);
+    int handlerCount = conf.getInt(RPC_SERVER_HANDLER_COUNT, 10);
+    if (isStandalone) {
+      handlerCount = conf.getInt(RPC_SERVER_HANDLER_COUNT_STANDALONE, 100);
+    }
 
     // Use the DNS hostname so that Task Trackers can connect to JT.
     jobTrackerAddress = NetUtils.createSocketAddr(
@@ -765,13 +802,13 @@ public class CoronaJobTracker extends JobTrackerTraits
     return trackerStats;
   }
 
-  public CoronaTaskTrackerProtocol getTaskTrackerClient(InetSocketAddress a)
+  public CoronaTaskTrackerProtocol getTaskTrackerClient(String host, int port)
     throws IOException {
-    return trackerClientCache.createClient(a);
+    return trackerClientCache.getClient(host, port);
   }
 
-  public void resetTaskTrackerClient(InetSocketAddress a) {
-    trackerClientCache.resetClient(a);
+  public void resetTaskTrackerClient(String host, int port) {
+    trackerClientCache.resetClient(host, port);
   }
 
   protected void closeIfComplete(boolean closeFromWebUI) throws IOException {
@@ -786,7 +823,27 @@ public class CoronaJobTracker extends JobTrackerTraits
     }
   }
 
+  /**
+   * Cleanup after CoronaJobTracker operation.
+   * If remote CJT error occured use overloaded version.
+   * @param closeFromWebUI Indicates whether called from web UI.
+   * @throws IOException
+   * @throws InterruptedException
+   */
   void close(boolean closeFromWebUI) throws IOException, InterruptedException {
+    close(closeFromWebUI, false);
+  }
+
+  /**
+   * Cleanup after CoronaJobTracker operation.
+   * @param closeFromWebUI Indicates whether called from web UI.
+   * @param remoteJTFailure Indicates whether the remote CJT failed or
+   * is unreachable.
+   * @throws IOException
+   * @throws InterruptedException
+   */
+  void close(boolean closeFromWebUI, boolean remoteJTFailure)
+    throws IOException, InterruptedException {
     synchronized (closeLock) {
       if (!running) {
         return;
@@ -808,9 +865,16 @@ public class CoronaJobTracker extends JobTrackerTraits
       if (sessionDriver != null) {
         int jobState = 0;
         if (job == null) {
-          // The remote JT will have the real status.
-          jobState = JobStatus.SUCCEEDED;
-          sessionDriver.stop(getSessionEndStatus(jobState));
+          if (remoteJTFailure) {
+            // There will be no feedback from remote JT because it died.
+            LOG.warn("JobTracker died or is unreachable." +
+              "Reporting to ClusterManager.");
+            sessionDriver.stop(SessionStatus.FAILED_JOBTRACKER);
+          } else {
+            // The remote JT will have the real status.
+            jobState = JobStatus.SUCCEEDED;
+            sessionDriver.stop(getSessionEndStatus(jobState));
+          }
         } else {
           jobState = job.getStatus().getRunState();
           if (jobState != JobStatus.SUCCEEDED) {
@@ -861,14 +925,39 @@ public class CoronaJobTracker extends JobTrackerTraits
       }
       // Stop RPC server. This is done near the end of the function
       // since this could be called through a RPC heartbeat call.
-      // Stop the RPC server only if this job tracker is not operating
-      // in "remote" mode and it did not start a remote job tracker.
-      // We need the RPC server to hang around so that status
-      // calls from local JT -> remote JT and heartbeats from
-      // remote JT -> local JT continue to work after the job has completed.
-      if (!this.isStandalone && remoteJT == null &&
-        interTrackerServer != null) {
-        interTrackerServer.stop();
+      // If (standalone == true)
+      //   - dont stop the RPC server at all. When this cannot talk to the parent,
+      //     it will exit the process.
+      // if (standalone == false)
+      //   - if there is no remote JT, close right away
+      //   - if there is a remote JT, close after 1min.
+      if (interTrackerServer != null) {
+        if (!isStandalone) {
+          if (remoteJT == null) {
+            interTrackerServer.stop();
+          } else {
+            final int timeout = conf.getInt(RPC_SERVER_STOP_TIMEOUT, 0);
+            if (timeout > 0) {
+              LOG.info("Starting async thread to stop RPC server for " + jobId);
+              Thread async = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                  try {
+                    Thread.sleep(timeout);
+                    LOG.info("Stopping RPC server for " + jobId);
+                    interTrackerServer.stop();
+                    remoteJT.close();
+                  } catch (InterruptedException e) {
+                    LOG.warn(
+                    "Interrupted during wait before stopping RPC server");
+                  }
+                }
+              });
+              async.setDaemon(true);
+              async.start();
+            }
+          }
+        }
       }
 
       synchronized (lockObject) {
@@ -882,7 +971,7 @@ public class CoronaJobTracker extends JobTrackerTraits
     if (job == null) {
       return;
     }
-    Counters jobCounters = job.getJobCounters();
+    Counters jobCounters = job.getCounters();
     JobStats jobStats = job.getJobStats();
     String pool = null;
     if (sessionDriver != null) {
@@ -995,7 +1084,8 @@ public class CoronaJobTracker extends JobTrackerTraits
   @Override
   public boolean processAvailableResource(ResourceGrant grant) {
     if (isBadResource(grant)) {
-      LOG.info("Resource " + grant.getId() + " is bad");
+      LOG.info("Resource " + grant.getId() + " nodename " +
+        grant.getNodeName() + " is bad");
       processBadResource(grant.getId(), true);
       // return true since this request was bad and will be returned
       // so it should no longer be available
@@ -1003,7 +1093,8 @@ public class CoronaJobTracker extends JobTrackerTraits
     } else if (!isResourceNeeded(grant)) {
       // This resource is no longer needed, but it is not a fault
       // of the host
-      LOG.info("Resource " + grant.getId() + " is not needed");
+      LOG.info("Resource " + grant.getId() + " nodename " +
+        grant.getNodeName() + " is not needed");
       processBadResource(grant.getId(), false);
       return true;
     }
@@ -1692,6 +1783,10 @@ public class CoronaJobTracker extends JobTrackerTraits
       throw new RuntimeException(
         "CoronaJobTracker can only run one job! (value=" + value + ")");
     }
+    createSession();
+    // the jobtracker can run only a single job. it's jobid is fixed based
+    // on the sessionId.
+    jobId = CoronaJobTracker.jobIdFromSessionId(sessionId);
     return jobId;
   }
 
@@ -1740,19 +1835,24 @@ public class CoronaJobTracker extends JobTrackerTraits
 
   @Override
   public void killJob(JobID jobId) throws IOException {
-    checkJobId(jobId);
-    LOG.info("Killing job " + jobId);
-    if (remoteJT == null) {
-      job.kill();
-      closeIfComplete(false);
-    } else {
-      remoteJT.killJob(jobId);
-      LOG.info("Successfully killed " + jobId + " on remote JT, closing");
-      try {
-        close(false);
-      } catch (InterruptedException e) {
-        throw new IOException(e);
+    if (jobId.equals(this.jobId)) {
+      LOG.info("Killing owned job " + jobId);
+      if (remoteJT == null) {
+        job.kill();
+        closeIfComplete(false);
+      } else {
+        remoteJT.killJob(jobId);
+        LOG.info("Successfully killed " + jobId + " on remote JT, closing");
+        try {
+          close(false);
+        } catch (InterruptedException e) {
+          throw new IOException(e);
+        }
       }
+    } else {
+      String sessionId = sessionIdFromJobID(jobId);
+      LOG.info("Killing session " + sessionId + " for non-owned job " + jobId);
+      CoronaClient.killSession(sessionId, conf);
     }
   }
 

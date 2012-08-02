@@ -506,7 +506,7 @@ public class MiniAvatarCluster {
     LOG.info("Closed zk client connection for registerZookeeper");
   }
 
-  private void clearZooKeeperNode(int nnIndex) throws IOException {
+  void clearZooKeeperNode(int nnIndex) throws IOException {
     NameNodeInfo nni = this.nameNodes[nnIndex];
     AvatarZooKeeperClient zkClient = new AvatarZooKeeperClient(nni.conf, null);
     zkClient.clearPrimary("localhost:" + nni.httpPort);
@@ -601,7 +601,22 @@ public class MiniAvatarCluster {
                                  nni.nn0Port, nni.nnDn0Port, nni.http0Port, nni.rpc0Port,
                                  AvatarConstants.StartupOption.NODEZERO.
                                  getName()));
-
+      
+      // wait for up to 10 seconds until the ACTIVE is initialized
+      for (int i = 0; i < 10; i++) {
+        if (a0.isInitialized())
+          break;
+        LOG.info("Waiting for the ACTIVE to be initialized...");
+        try {
+          Thread.sleep(1000);
+        } catch (InterruptedException e) {
+          throw new IOException(
+              "Received interruption when initializing ACTIVE node");
+        }
+      }
+      if (!a0.isInitialized()) {
+        throw new IOException("The ACTIVE cannot be initialized");
+      }
     }
 
     {
@@ -890,8 +905,9 @@ public class MiniAvatarCluster {
       }
     }
   }
-  
-  public DistributedAvatarFileSystem getFileSystem() throws IOException {
+
+  public DistributedAvatarFileSystem getFileSystem()
+      throws IOException {
     checkSingleNameNode();
     return getFileSystem(0);
   }
@@ -899,8 +915,10 @@ public class MiniAvatarCluster {
   /**
    * Get DAFS.
    */
-  public DistributedAvatarFileSystem getFileSystem(int nnIndex) throws IOException {
-    FileSystem fs = FileSystem.get(this.nameNodes[nnIndex].clientConf);
+  public DistributedAvatarFileSystem getFileSystem(int nnIndex)
+      throws IOException {
+    FileSystem fs = FileSystem
+        .get(this.nameNodes[nnIndex].clientConf);
 
     if (!(fs instanceof DistributedAvatarFileSystem)) {
       throw new IOException("fs is not avatar fs");
@@ -982,8 +1000,12 @@ public class MiniAvatarCluster {
   }
 
   public void failOver() throws IOException {
+    failOver(false);
+  }
+
+  public void failOver(boolean force) throws IOException {
     checkSingleNameNode();
-    failOver(0);
+    failOver(0, force);
   }
 
   /**
@@ -991,6 +1013,10 @@ public class MiniAvatarCluster {
    * primary avatar first if necessary.
    */
   public void failOver(int nnIndex) throws IOException {
+    failOver(nnIndex, false);
+  }
+
+  public void failOver(int nnIndex, boolean force) throws IOException {
     if (getPrimaryAvatar(nnIndex) != null) {
       LOG.info("killing primary avatar before failover");
       killPrimary(nnIndex);
@@ -1001,7 +1027,7 @@ public class MiniAvatarCluster {
       throw new IOException("no standby avatar running");
     }
 
-    standby.avatar.setAvatar(AvatarConstants.Avatar.ACTIVE);
+    standby.avatar.setAvatar(AvatarConstants.Avatar.ACTIVE, force);
     standby.state = AvatarState.ACTIVE;
     registerZooKeeperNode(standby.nnPort, standby.nnDnPort, standby.httpPort,
         standby.rpcPort, this.nameNodes[nnIndex]);
@@ -1217,7 +1243,9 @@ public class MiniAvatarCluster {
       dn.datanode = AvatarDataNode.instantiateDataNode(dn.dnArgs, 
           new Configuration(dn.conf));
       dn.datanode.runDatanodeDaemon();
-      waitDataNodeInitialized(dn.datanode);
+      if (waitActive) {
+        waitDataNodeInitialized(dn.datanode);
+      }
     }
     if (waitActive) {
       waitDataNodesActive();

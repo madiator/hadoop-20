@@ -68,6 +68,8 @@ import org.apache.hadoop.raid.BlockReconstructor.CorruptBlockReconstructor;
 import org.apache.hadoop.raid.DistBlockIntegrityMonitor.Worker.LostFileInfo;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.ToolRunner;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * distributed block integrity monitor, uses parity to reconstruct lost files
@@ -127,6 +129,8 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
   public static final String SIMULATION_FAILED_FILE = "simulation_failed";
  
   protected static final Log LOG = LogFactory.getLog(DistBlockIntegrityMonitor.class);
+  
+  private static final String CORRUPT_FILE_DETECT_TIME = "corrupt_detect_time";
 
   // number of files to reconstruct in a task
   private long filesPerTask;
@@ -213,6 +217,8 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
     private long jobCounter = 0;
     private volatile int numJobsRunning = 0;
     
+    protected long numFilesDropped = 0;
+    
     volatile BlockIntegrityMonitor.Status lastStatus = null;
     long recentNumFilesSucceeded = 0;
     long recentNumFilesFailed = 0;
@@ -268,20 +274,20 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
     void checkAndReconstructBlocks()
     throws IOException, InterruptedException, ClassNotFoundException {
       checkJobs();
-
       if (jobIndex.size() >= maxPendingJobs) {
         LOG.info("Waiting for " + jobIndex.size() + " pending jobs");
         return;
       }
 
       Map<String, Integer> lostFiles = getLostFiles();
+      long detectTime = System.currentTimeMillis();
       FileSystem fs = new Path("/").getFileSystem(getConf());
       Map<String, Priority> filePriorities =
         computePriorities(fs, lostFiles);
 
       LOG.info("Found " + filePriorities.size() + " new lost files");
 
-      startJobs(filePriorities);
+      startJobs(filePriorities, detectTime);
     }
 
     /**
@@ -465,6 +471,7 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
           Text key = new Text();
           Text value = new Text();
           while (reader.next(key, value)) {
+            LOG.info("key: " + key.toString() + " , value: " + value.toString());
             failedFiles.put(key.toString(), value.toString());
           }
           reader.close();
@@ -489,10 +496,10 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
     }
 
     // Start jobs for all the lost files.
-    private void startJobs(Map<String, Priority> filePriorities)
+    private void startJobs(Map<String, Priority> filePriorities, long detectTime)
     throws IOException, InterruptedException, ClassNotFoundException {
       String startTimeStr = dateFormat.format(new Date());
-
+      long numFilesSubmitted = 0;
       for (Priority pri : Priority.values()) {
         Set<String> jobFiles = new HashSet<String>();
         for (Map.Entry<String, Priority> entry: filePriorities.entrySet()) {
@@ -506,26 +513,37 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
             String jobName = JOB_NAME_PREFIX + "." + jobCounter +
             "." + pri + "-pri" + "." + startTimeStr;
             jobCounter++;
-            startJob(jobName, jobFiles, pri);
+            startJob(jobName, jobFiles, pri, detectTime);
+            numFilesSubmitted += jobFiles.size();
             jobFiles.clear();
-            if (jobIndex.size() > maxPendingJobs) return;
+            if (jobIndex.size() >= maxPendingJobs) {
+              this.numFilesDropped = filePriorities.size() - numFilesSubmitted;
+              LOG.debug("Submitted a job with max number of files allowed. Num files dropped is " + this.numFilesDropped);
+              return;
+            }
           }
         }
         if (jobFiles.size() > 0) {
           String jobName = JOB_NAME_PREFIX + "." + jobCounter +
           "." + pri + "-pri" + "." + startTimeStr;
           jobCounter++;
-          startJob(jobName, jobFiles, pri);
+          startJob(jobName, jobFiles, pri, detectTime);
+          numFilesSubmitted += jobFiles.size();
           jobFiles.clear();
-          if (jobIndex.size() > maxPendingJobs) return;
+          if (jobIndex.size() >= maxPendingJobs) {
+            this.numFilesDropped = filePriorities.size() - numFilesSubmitted;
+            LOG.debug("Submitted a job with less than max allowed files. Num files dropped is " + this.numFilesDropped);
+            return;
+          }
         }
       }
+      this.numFilesDropped = filePriorities.size() - numFilesSubmitted;
     }
 
     /**
      * creates and submits a job, updates file index and job index
      */
-    private void startJob(String jobName, Set<String> lostFiles, Priority priority)
+    private void startJob(String jobName, Set<String> lostFiles, Priority priority, long detectTime)
     throws IOException, InterruptedException, ClassNotFoundException {
       Path inDir = new Path(JOB_NAME_PREFIX + "/in/" + jobName);
       Path outDir = new Path(JOB_NAME_PREFIX + "/out/" + jobName);
@@ -536,6 +554,7 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       Configuration jobConf = new Configuration(getConf());
       RaidUtils.parseAndSetOptions(jobConf, priority.configOption);
       Job job = new Job(jobConf, jobName);
+      job.getConfiguration().set(CORRUPT_FILE_DETECT_TIME, Long.toString(detectTime));
       configureJob(job, this.RECONSTRUCTOR_CLASS);
       job.setJarByClass(getClass());
       job.setMapperClass(ReconstructionMapper.class);
@@ -547,6 +566,7 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
 
       ReconstructionInputFormat.setInputPaths(job, inDir);
       SequenceFileOutputFormat.setOutputPath(job, outDir);
+      
 
       submitJob(job, filesInJob, priority);
       List<LostFileInfo> fileInfos =
@@ -753,23 +773,32 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
     public String[] corruptMonitorDirs = null;
     private TreeMap<String, Long> counterMap = 
         new TreeMap<String, Long>();
+    private long filesWithMissingBlksCnt = 0;
+    private long[] numStrpWithMissingBlksRS = 
+        new long[Codec.getCodec("rs").stripeLength+Codec.getCodec("rs").parityLength];
     private Object counterMapLock = new Object();
-    
+
     public CorruptFileCounter() {
       this.corruptMonitorDirs = getCorruptMonitorDirs(getConf());
     }
-    
+
     public void run() {
       RaidNodeMetrics.getInstance(
           RaidNodeMetrics.DEFAULT_NAMESPACE_ID).initCorruptFilesMetrics(getConf());
       while (running) {
         TreeMap<String, Long> newCounterMap = new TreeMap<String, Long>();
+        long newfilesWithMissingBlksCnt = 0;
+        long incfilesWithMissingBlks = 0;
+        long[] newNumStrpWithMissingBlks = 
+            new long[Codec.getCodec("rs").stripeLength+Codec.getCodec("rs").parityLength];
+        long[] incNumStrpWithMissingBlks = 
+            new long[Codec.getCodec("rs").stripeLength+Codec.getCodec("rs").parityLength];
         for (String srcDir: corruptMonitorDirs) {
           try {
             ByteArrayOutputStream bout = new ByteArrayOutputStream();
             PrintStream ps = new PrintStream(bout, true);
             RaidShell shell = new RaidShell(getConf(), ps);
-            int res = ToolRunner.run(shell, new String[]{"-fsck", srcDir, "-count"});
+            int res = ToolRunner.run(shell, new String[]{"-fsck", srcDir, "-count", "-retNumStrpsMissingBlksRS"});
             shell.close();
             ByteArrayInputStream bin = new ByteArrayInputStream(bout.toByteArray());
             BufferedReader reader = new BufferedReader(new InputStreamReader(bin));
@@ -780,6 +809,28 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
             Long corruptCount = Long.parseLong(line);
             LOG.info("The number of corrupt files under " + srcDir + " is " + corruptCount);
             newCounterMap.put(srcDir, corruptCount);
+            line = reader.readLine();
+            if (line == null) {
+              throw new IOException("Raidfsck did not print number of files with missing blocks");
+            }
+            //Add filesWithMissingBlks and numStrpWithMissingBlks only for "/" dir to avoid duplicates
+            if (srcDir.equals("/")) {
+              incfilesWithMissingBlks = Long.parseLong(line);
+              LOG.info("The number of files with missing blocks under " + srcDir + " is " + incfilesWithMissingBlks);
+              // fsck with '-count' prints this number in line2 
+              newfilesWithMissingBlksCnt += incfilesWithMissingBlks; 
+              // read the array for num stripes with missing blocks
+
+              for(int i = 0; i < incNumStrpWithMissingBlks.length; i++){
+                line = reader.readLine();
+                if (line == null) {
+                  throw new IOException("Raidfsck did not print the array for number stripes with missing blocks for index " + i);
+                }
+                incNumStrpWithMissingBlks[i] = Long.parseLong(line);
+                LOG.info("The number of stripes with missing blocks at index"+ i + "under" + srcDir + " is " + incNumStrpWithMissingBlks[i]);
+                newNumStrpWithMissingBlks[i] += incNumStrpWithMissingBlks[i];
+              }
+            }
             reader.close();
             bin.close();
           } catch (Exception e) {
@@ -788,6 +839,8 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
         }
         synchronized(counterMapLock) {
           this.counterMap = newCounterMap;
+          this.filesWithMissingBlksCnt = newfilesWithMissingBlksCnt;
+          this.numStrpWithMissingBlksRS = newNumStrpWithMissingBlks;
         }
         updateRaidNodeMetrics();
 
@@ -798,16 +851,29 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
         }
       }
     }
-    
+
     public Map<String, Long> getCounterMap() {
       synchronized (counterMapLock) {
         return counterMap;
       }
     }
-    
+
+    public long getFilesWithMissingBlksCnt(){
+      synchronized (counterMapLock) {
+        return filesWithMissingBlksCnt;
+      }
+    }
+
+    public long[] getNumStrpWithMissingBlksRS(){
+      synchronized (counterMapLock) {
+        return numStrpWithMissingBlksRS;
+      }
+    }
+
     protected void updateRaidNodeMetrics() {
       RaidNodeMetrics rnm = RaidNodeMetrics.getInstance(
           RaidNodeMetrics.DEFAULT_NAMESPACE_ID);
+
       synchronized(counterMapLock) {
         for (String dir : corruptMonitorDirs) {
           if (this.counterMap.containsKey(dir)) {
@@ -816,23 +882,34 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
             rnm.corruptFiles.get(dir).set(-1L);
           }
         }
+        rnm.numFilesWithMissingBlks.set(this.filesWithMissingBlksCnt);
+        rnm.numStrpsOneMissingBlk.set(this.numStrpWithMissingBlksRS[0]);
+        rnm.numStrpsTwoMissingBlk.set(this.numStrpWithMissingBlksRS[1]);
+        rnm.numStrpsThreeMissingBlk.set(this.numStrpWithMissingBlksRS[2]);
+        rnm.numStrpsFourMissingBlk.set(this.numStrpWithMissingBlksRS[3]);
+
+        long tmp_sum = 0;
+        for (int idx=4; idx < this.numStrpWithMissingBlksRS.length;idx++) {
+          tmp_sum += this.numStrpWithMissingBlksRS[idx];
+        }   
+        rnm.numStrpsFiveMoreMissingBlk.set(tmp_sum);     
       }
     }
   }
-  
+
   public class CorruptionWorker extends Worker {
-    
+
     public CorruptionWorker() {
       super(LogFactory.getLog(CorruptionWorker.class), 
-            CorruptBlockReconstructor.class, 
-            "blockfixer");
+          CorruptBlockReconstructor.class, 
+          "blockfixer");
     }
 
     @Override
     protected Map<String, Integer> getLostFiles() throws IOException {
       return DistBlockIntegrityMonitor.this.getLostFiles(LIST_CORRUPT_FILE_PATTERN, 
-                    new String[]{"-list-corruptfileblocks", "-limit", 
-                      new Integer(lostFilesLimit).toString()});
+          new String[]{"-list-corruptfileblocks", "-limit", 
+          new Integer(lostFilesLimit).toString()});
     }
 
     @Override
@@ -841,12 +918,11 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
         FileSystem fs, Map<String, Integer> corruptFiles) throws IOException {
 
       Map<String, Priority> fileToPriority = new HashMap<String, Priority>();
-      String[] parityDestPrefixes = destPrefixes();
       Set<String> srcDirsToWatchOutFor = new HashSet<String>();
       // Loop over parity files once.
       for (Iterator<String> it = corruptFiles.keySet().iterator(); it.hasNext(); ) {
         String p = it.next();
-        if (BlockIntegrityMonitor.isSourceFile(p, parityDestPrefixes)) {
+        if (BlockIntegrityMonitor.isSourceFile(p)) {
           continue;
         }
         // Find the parent of the parity file.
@@ -870,12 +946,12 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       // Loop over src files now.
       for (Iterator<String> it = corruptFiles.keySet().iterator(); it.hasNext(); ) {
         String p = it.next();
-        if (BlockIntegrityMonitor.isSourceFile(p, parityDestPrefixes)) {
+        if (BlockIntegrityMonitor.isSourceFile(p)) {
           FileStatus stat = fs.getFileStatus(new Path(p));
           if (stat.getReplication() >= notRaidedReplication) {
             continue;
           }
-          if (BlockIntegrityMonitor.doesParityDirExist(fs, p, parityDestPrefixes)) {
+          if (BlockIntegrityMonitor.doesParityDirExist(fs, p)) {
             int numCorrupt = corruptFiles.get(p);
             Priority priority = Priority.LOW;
             if (stat.getReplication() > 1) {
@@ -905,19 +981,20 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       }
       return fileToPriority;
     }
-    
+
     @Override
     protected void updateRaidNodeMetrics() {
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).corruptFilesHighPri.set(lastStatus.highPriorityFiles);
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).corruptFilesLowPri.set(lastStatus.lowPriorityFiles);
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).numFilesToFix.set(this.fileIndex.size());
-      
+      RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).numFilesToFixDropped.set(this.numFilesDropped);
+
       // Flush statistics out to the RaidNode
       incrFilesFixed(this.recentNumFilesSucceeded);
       incrFileFixFailures(this.recentNumFilesFailed);
       incrNumBlockFixSimulationFailures(this.recentNumBlockFixSimulationFailed);
       incrNumBlockFixSimulationSuccess(this.recentNumBlockFixSimulationSucceeded);
-      
+
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).blockFixSlotSeconds.inc(this.recentSlotSeconds);
       this.recentNumFilesSucceeded = 0;
       this.recentNumFilesFailed = 0;
@@ -925,17 +1002,17 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       this.recentNumBlockFixSimulationFailed = 0;
       this.recentNumBlockFixSimulationSucceeded = 0;
     }
-    
+
   }
-  
+
   public class DecommissioningWorker extends Worker {
 
     DecommissioningWorker() {
       super(LogFactory.getLog(DecommissioningWorker.class), 
-            BlockReconstructor.DecommissioningBlockReconstructor.class, 
-            "blockcopier");
+          BlockReconstructor.DecommissioningBlockReconstructor.class, 
+          "blockcopier");
     }
-    
+
 
     /**
      * gets a list of decommissioning files from the namenode
@@ -944,27 +1021,27 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
      */
     protected Map<String, Integer> getLostFiles() throws IOException {
       return DistBlockIntegrityMonitor.this.getLostFiles(LIST_DECOMMISSION_FILE_PATTERN,
-                              new String[]{"-list-corruptfileblocks",
-                                "-list-decommissioningblocks",
-                                "-limit",
-                                new Integer(lostFilesLimit).toString()});
+          new String[]{"-list-corruptfileblocks",
+          "-list-decommissioningblocks",
+          "-limit",
+          new Integer(lostFilesLimit).toString()});
     }
 
     Map<String, Priority> computePriorities(
         FileSystem fs, Map<String, Integer> decommissioningFiles)
-        throws IOException {
+            throws IOException {
 
       Map<String, Priority> fileToPriority =
           new HashMap<String, Priority>(decommissioningFiles.size());
 
       for (String file : decommissioningFiles.keySet()) {
-        
+
         // Replication == 1. Assume Reed Solomon parity exists.
         // Files with more than 4 blocks being decommissioned get a bump.
         // Otherwise, copying jobs have the lowest priority. 
         Priority priority = ((decommissioningFiles.get(file) > Codec.getCodec("rs").parityLength) ? 
-                                  Priority.LOW : Priority.LOWEST);
-        
+            Priority.LOW : Priority.LOWEST);
+
         LostFileInfo fileInfo = fileIndex.get(file);
         if (fileInfo == null || priority.higherThan(fileInfo.getHighestPriority())) {
           fileToPriority.put(file, priority);
@@ -978,13 +1055,13 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).decomFilesLowPri.set(lastStatus.highPriorityFiles);
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).decomFilesLowestPri.set(lastStatus.lowPriorityFiles);
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).numFilesToCopy.set(fileIndex.size());
-      
+
       incrFilesCopied(recentNumFilesSucceeded);
       incrFileCopyFailures(recentNumFilesFailed);
       incrNumBlockFixSimulationFailures(this.recentNumBlockFixSimulationFailed);
       incrNumBlockFixSimulationSuccess(this.recentNumBlockFixSimulationSucceeded);
       RaidNodeMetrics.getInstance(RaidNodeMetrics.DEFAULT_NAMESPACE_ID).blockCopySlotSeconds.inc(recentSlotSeconds);
-      
+
       // Reset temporary values now that they've been flushed
       recentNumFilesSucceeded = 0;
       recentNumFilesFailed = 0;
@@ -1023,10 +1100,10 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       lostFiles.put(fileName, numLost);
     }
     LOG.info("FSCK returned " + lostFiles.size() + " files with args " +
-      Arrays.toString(dfsckArgs));
+        Arrays.toString(dfsckArgs));
     RaidUtils.filterTrash(getConf(), lostFiles.keySet().iterator());
     LOG.info("getLostFiles returning " + lostFiles.size() + " files with args " +
-      Arrays.toString(dfsckArgs));
+        Arrays.toString(dfsckArgs));
     return lostFiles;
   }
 
@@ -1044,23 +1121,23 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
     ByteArrayInputStream bin = new ByteArrayInputStream(bout.toByteArray());
     return new BufferedReader(new InputStreamReader(bin));
   }
-  
+
   public void configureJob(Job job, 
-        Class<? extends BlockReconstructor> reconstructorClass) {
-    
+      Class<? extends BlockReconstructor> reconstructorClass) {
+
     ((JobConf)job.getConfiguration()).setUser(RaidNode.JOBUSER);
     ((JobConf)job.getConfiguration()).setClass(
         ReconstructionMapper.RECONSTRUCTOR_CLASS_TAG, 
         reconstructorClass,
         BlockReconstructor.class);
   }
-  
+
   void submitJob(Job job, List<String> filesInJob, Priority priority, 
-                 Map<Job, List<LostFileInfo>> jobIndex)
-  throws IOException, InterruptedException, ClassNotFoundException {
+      Map<Job, List<LostFileInfo>> jobIndex)
+          throws IOException, InterruptedException, ClassNotFoundException {
     job.submit();
     LOG.info("Job " + job.getID() + "(" + job.getJobName() +
-    ") started");
+        ") started");
     jobIndex.put(job, null);
   }
 
@@ -1073,11 +1150,11 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
   }
 
   static class ReconstructionInputFormat
-    extends SequenceFileInputFormat<LongWritable, Text> {
+  extends SequenceFileInputFormat<LongWritable, Text> {
 
     protected static final Log LOG = 
-      LogFactory.getLog(ReconstructionMapper.class);
-    
+        LogFactory.getLog(ReconstructionMapper.class);
+
     /**
      * splits the input files into tasks handled by a single node
      * we have to read the input files to do this based on a number of 
@@ -1085,7 +1162,7 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
      */
     @Override
     public List <InputSplit> getSplits(JobContext job) 
-      throws IOException {
+        throws IOException {
       long filesPerTask = DistBlockIntegrityMonitor.getFilesPerTask(job.getConfiguration());
 
       Path[] inPaths = getInputPaths(job);
@@ -1095,7 +1172,7 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       long fileCounter = 0;
 
       for (Path inPath: inPaths) {
-        
+
         FileSystem fs = inPath.getFileSystem(job.getConfiguration());      
 
         if (!fs.getFileStatus(inPath).isDir()) {
@@ -1106,17 +1183,17 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
 
         for (FileStatus inFileStatus: inFiles) {
           Path inFile = inFileStatus.getPath();
-          
+
           if (!inFileStatus.isDir() &&
               (inFile.getName().equals(job.getJobName() + IN_FILE_SUFFIX))) {
 
             fileCounter++;
             SequenceFile.Reader inFileReader = 
-              new SequenceFile.Reader(fs, inFile, job.getConfiguration());
-            
+                new SequenceFile.Reader(fs, inFile, job.getConfiguration());
+
             long startPos = inFileReader.getPosition();
             long counter = 0;
-            
+
             // create an input split every filesPerTask items in the sequence
             LongWritable key = new LongWritable();
             Text value = new Text();
@@ -1124,20 +1201,20 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
               while (inFileReader.next(key, value)) {
                 if (counter % filesPerTask == filesPerTask - 1L) {
                   splits.add(new FileSplit(inFile, startPos, 
-                                           inFileReader.getPosition() - 
-                                           startPos,
-                                           null));
+                      inFileReader.getPosition() - 
+                      startPos,
+                      null));
                   startPos = inFileReader.getPosition();
                 }
                 counter++;
               }
-              
+
               // create input split for remaining items if necessary
               // this includes the case where no splits were created by the loop
               if (startPos != inFileReader.getPosition()) {
                 splits.add(new FileSplit(inFile, startPos,
-                                         inFileReader.getPosition() - startPos,
-                                         null));
+                    inFileReader.getPosition() - startPos,
+                    null));
               }
             } finally {
               inFileReader.close();
@@ -1147,8 +1224,8 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       }
 
       LOG.info("created " + splits.size() + " input splits from " +
-               fileCounter + " files");
-      
+          fileCounter + " files");
+
       return splits;
     }
 
@@ -1165,29 +1242,32 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
    * Mapper for reconstructing stripes with lost blocks
    */
   static class ReconstructionMapper
-    extends Mapper<LongWritable, Text, Text, Text> {
+  extends Mapper<LongWritable, Text, Text, Text> {
 
     protected static final Log LOG = 
-      LogFactory.getLog(ReconstructionMapper.class);
-    
-    public static final String RECONSTRUCTOR_CLASS_TAG =
-      "hdfs.blockintegrity.reconstructor";
-    
-    private BlockReconstructor reconstructor;
+        LogFactory.getLog(ReconstructionMapper.class);
+    protected static final Log FILEFIX_WAITTIME_METRICS_LOG = 
+        LogFactory.getLog("RaidMetrics");
 
-    
+    public static final String RECONSTRUCTOR_CLASS_TAG =
+        "hdfs.blockintegrity.reconstructor";
+
+    private BlockReconstructor reconstructor;
+    private long detectTimeInput;
+
+
     @Override
     protected void setup(Context context) 
         throws IOException, InterruptedException {
-      
+
       super.setup(context);
-      
+
       Configuration conf = context.getConfiguration();
 
       Codec.initializeCodecs(conf);
-      
+
       Class<? extends BlockReconstructor> reconstructorClass = 
-        context.getConfiguration().getClass(RECONSTRUCTOR_CLASS_TAG, 
+          context.getConfiguration().getClass(RECONSTRUCTOR_CLASS_TAG, 
                                             null, 
                                             BlockReconstructor.class);
       
@@ -1208,7 +1288,9 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
       } catch (Exception ex) {
         throw new IOException("Could not instantiate a block reconstructor " +
                           "based on class " + reconstructorClass, ex);
-      }  
+      }
+      
+      detectTimeInput = Long.parseLong(conf.get("corrupt_detect_time"));
     }
 
     /**
@@ -1220,8 +1302,10 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
 
       String fileStr = fileText.toString();
       LOG.info("reconstructing " + fileStr);
-
       Path file = new Path(fileStr);
+      long waitTime = System.currentTimeMillis() - detectTimeInput;
+      logWaitTimeMetrics(waitTime, getMaxPendingJobs(context.getConfiguration()), 
+          getFilesPerTask(context.getConfiguration()),"FILE_FIX_WAITTIME");
 
       try {
         boolean reconstructed = reconstructor.reconstructFile(file, context);
@@ -1239,8 +1323,22 @@ public class DistBlockIntegrityMonitor extends BlockIntegrityMonitor {
         String outval = "failed";
         context.write(new Text(outkey), new Text(outval));
       }
-
       context.progress();
+    }
+    
+    private void logWaitTimeMetrics (
+        long waitTime, long maxPendingJobsLimit, long filesPerTaskLimit, String type) {
+      
+      try {
+        JSONObject json = new JSONObject();
+        json.put("fileFixWaitTime", waitTime);
+        json.put("maxPendingJobs", maxPendingJobsLimit);
+        json.put("maxFilesPerTask", filesPerTaskLimit);
+        json.put("type",type); 
+        FILEFIX_WAITTIME_METRICS_LOG.info(json.toString());
+      } catch(JSONException e) {
+        LOG.warn("Exception when logging the File_Fix_WaitTime metric : " + e.getMessage(), e);
+      }
     }
   }
 

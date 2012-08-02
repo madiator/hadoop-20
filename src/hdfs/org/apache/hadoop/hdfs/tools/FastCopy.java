@@ -178,6 +178,40 @@ public class FastCopy {
     return Collections.unmodifiableMap(this.datanodeErrors);
   }
 
+  private static void swap(int i, int j, DatanodeInfo[] arr) {
+    DatanodeInfo tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+
+  /**
+   * Aligns the source and destination locations such that common locations
+   * appear at the same index.
+   * 
+   * @param dstLocs
+   *          the destination datanodes
+   * @param srcLocs
+   *          the source datanodes
+   */
+  public static void alignDatanodes(DatanodeInfo[] dstLocs,
+      DatanodeInfo[] srcLocs) {
+    for (int i = 0; i < dstLocs.length; i++) {
+      for (int j = 0; j < srcLocs.length; j++) {
+        if (i == j)
+          continue;
+        if (dstLocs[i].equals(srcLocs[j])) {
+          if (i < j) {
+            swap(i, j, srcLocs);
+          } else {
+            swap(i, j, dstLocs);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+
   private class FastFileCopy implements Callable<Boolean> {
     private final String src;
     private final String destination;
@@ -186,8 +220,6 @@ public class FastCopy {
     public final int blockRPCExecutorPoolSize;
     private int totalBlocks;
     
-    private final FileSystem srcFs;
-    private final FileSystem dstFs;
     private final ClientProtocol srcNamenode;
     private final ClientProtocol dstNamenode;
     private ProtocolProxy<ClientProtocol> srcNamenodeProtocolProxy;
@@ -408,23 +440,11 @@ public class FastCopy {
     public FastFileCopy(String src, String destination,
         DistributedFileSystem srcFs, DistributedFileSystem dstFs,
         Reporter reporter) throws Exception {
-      this.srcFs = srcFs;
-      this.dstFs = dstFs;
       this.reporter = reporter;
-      this.srcNamenodeProtocolProxy = DFSClient.createRPCNamenode(
-          NameNode.getAddress(this.srcFs.getUri().getAuthority()), conf,
-          UnixUserGroupInformation.login(conf, true));
-      this.srcNamenode = this.srcNamenodeProtocolProxy.getProxy();
-      // If both FS are same don't create unnecessary extra RPC connection.
-      if (this.dstFs.getUri().compareTo(this.srcFs.getUri()) != 0) {
-        this.dstNamenodeProtocolProxy = DFSClient.createRPCNamenode(
-            NameNode.getAddress(this.dstFs.getUri().getAuthority()), conf,
-            UnixUserGroupInformation.login(conf, true));
-        this.dstNamenode = this.dstNamenodeProtocolProxy.getProxy();
-      } else {
-        this.dstNamenodeProtocolProxy = this.srcNamenodeProtocolProxy;
-        this.dstNamenode = this.srcNamenode;
-      }
+      this.srcNamenode = srcFs.getClient().getNameNodeRPC();
+      this.srcNamenodeProtocolProxy = srcFs.getClient().namenodeProtocolProxy;
+      this.dstNamenode = dstFs.getClient().getNameNodeRPC();
+      this.dstNamenodeProtocolProxy = dstFs.getClient().namenodeProtocolProxy;
 
       this.leaseChecker = new LeaseChecker();
       // Start as a daemon thread.
@@ -478,8 +498,7 @@ public class FastCopy {
       // on the ordering of the locations that we receive from the NameNode.
       DatanodeInfo[] dstLocs = dst.getLocations();
       DatanodeInfo[] srcLocs = src.getLocations();
-      Arrays.sort(dstLocs);
-      Arrays.sort(srcLocs);
+      alignDatanodes(dstLocs, srcLocs);
 
       // We use minimum here, since its better for the NameNode to handle the
       // extra locations in either list. The locations that match up are the
@@ -672,6 +691,7 @@ public class FastCopy {
         // Instruct each datanode to create a copy of the respective block.
         int blocksAdded = 0;
         long startPos = 0;
+        Block lastBlock = null;
         // Loop through each block and create copies.
         for (LocatedBlock srcLocatedBlock : locatedBlocks) {
           DatanodeInfo[] favoredNodes = srcLocatedBlock.getLocations();
@@ -703,12 +723,13 @@ public class FastCopy {
           waitForBlockCopy(blocksAdded);
 
           checkAndThrowException();          
+          lastBlock = destinationLocatedBlock.getBlock();
         }
 
         terminateExecutor();
 
         // Wait for all blocks of the file to be copied.
-        waitForFile(src, destination);
+        waitForFile(src, destination, srcFileStatus.getLen(), lastBlock);
         
       } catch (IOException e) {
         LOG.error("failed to copy src : " + src + " dst : " + destination, e);
@@ -728,11 +749,20 @@ public class FastCopy {
      *          the source file
      * @param destination
      *          the destination file
+     * @param fileLen
+     *          the length of the file
+     * @param lastBlock
+     *          the last block of the file
      * @throws IOException
      */
-    private void waitForFile(String src, String destination)
+    private void waitForFile(String src, String destination,
+        long fileLen, Block lastBlock)
         throws IOException {
-      boolean flag = dstNamenode.complete(destination, clientName);
+      // We use this version of complete since only in this version calling
+      // complete on an already closed file doesn't throw a
+      // LeaseExpiredException.
+      boolean flag = dstNamenode.complete(destination, clientName, fileLen,
+          lastBlock);
       long startTime = System.currentTimeMillis();
 
       while (!flag) {
@@ -747,15 +777,14 @@ public class FastCopy {
           throw new IOException("Fast Copy : Could not complete file copy, "
               + "timedout while waiting for blocks to be copied");
         }
-        flag = dstNamenode.complete(destination, clientName);
+        flag = dstNamenode.complete(destination, clientName,
+            fileLen, lastBlock);
       }
       LOG.debug("Fast Copy succeeded for files src : " + src + " destination "
           + destination);
     }
     
     private void shutdown() {
-      RPC.stopProxy(srcNamenode);
-      RPC.stopProxy(dstNamenode);
       leaseChecker.closeRenewal();
       blockRPCExecutor.shutdownNow();
     }
