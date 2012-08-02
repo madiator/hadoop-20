@@ -20,6 +20,7 @@ package org.apache.hadoop.raid;
 
 import java.util.Set;
 
+import com.sun.org.apache.commons.logging.Log;
 import com.sun.org.apache.commons.logging.LogFactory;
 
 public class ReedSolomonCode extends ErasureCode {
