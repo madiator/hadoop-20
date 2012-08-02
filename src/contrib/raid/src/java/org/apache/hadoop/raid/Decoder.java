@@ -24,30 +24,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
-import java.util.Set;
+import java.util.zip.CRC32;
 
-import org.apache.hadoop.mapreduce.Mapper.Context;
-
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockMissingException;
 import org.apache.hadoop.fs.ChecksumException;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.raid.StripeReader.LocationPair;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.util.Progressable;
+import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.raid.DistBlockIntegrityMonitor.Counter;
-import org.json.JSONException;
-import org.json.JSONObject;
+import org.apache.hadoop.raid.StripeReader.LocationPair;
+import org.apache.hadoop.util.Progressable;
 
-import java.util.zip.CRC32;
+import com.sun.org.apache.commons.logging.LogFactory;
 
 /**
  * Represents a generic decoder that can be used to read a file with
@@ -55,7 +48,7 @@ import java.util.zip.CRC32;
  */
 public class Decoder {
   public static final Log LOG = LogFactory.getLog(
-                                  "org.apache.hadoop.raid.Decoder");
+      "org.apache.hadoop.raid.Decoder");
   public static final int DEFAULT_PARALLELISM = 4;
   protected Configuration conf;
   protected int parallelism;
@@ -71,18 +64,18 @@ public class Decoder {
   public Decoder(Configuration conf, Codec codec) {
     this.conf = conf;
     this.parallelism = conf.getInt("raid.encoder.parallelism",
-                                   DEFAULT_PARALLELISM);
+        DEFAULT_PARALLELISM);
     this.codec = codec;
     this.code = codec.createErasureCode(conf);
     this.rand = new Random();
     this.bufSize = conf.getInt("raid.decoder.bufsize", 1024 * 1024);
-   // this.writeBufs = new byte[codec.parityLength][];
+    // this.writeBufs = new byte[codec.parityLength][];
     this.readBufs = new byte[codec.parityLength + codec.stripeLength][];
     //allocateBuffers();
-    //writeBufs will be allocated when the writeBufs.length is known and 
+    //writeBufs will be allocated when the writeBufs.length is known and
     //writeBufs array can be initialized.
   }
-  
+
   public int getNumMissingBlocksInStripe() {
     return numMissingBlocksInStripe;
   }
@@ -90,22 +83,22 @@ public class Decoder {
   public long getNumReadBytes() {
     return numReadBytes;
   }
-  
+
   /*
   private void allocateBuffers() {
     for (int i = 0; i < codec.parityLength; i++) {
       writeBufs[i] = new byte[bufSize];
     }
   }
-  */
+   */
   private void allocateBuffers() {
-	  for (int i = 0; i < writeBufs.length; i++) {
-		writeBufs[i] = new byte[bufSize];
-	}
+    for (int i = 0; i < writeBufs.length; i++) {
+      writeBufs[i] = new byte[bufSize];
+    }
   }
 
   private void configureBuffers(long blockSize) {
-    if ((long)bufSize > blockSize) {
+    if (bufSize > blockSize) {
       bufSize = (int)blockSize;
       allocateBuffers();
     } else if (blockSize % bufSize != 0) {
@@ -136,13 +129,13 @@ public class Decoder {
    * @param reporter A mechanism to report progress.
    */
   public void recoverBlockToFile(
-    FileSystem srcFs, Path srcPath, FileSystem parityFs, Path parityPath,
-    long blockSize, long blockOffset, File localBlockFile, long limit,
-    Context context) throws IOException, InterruptedException {
+      FileSystem srcFs, Path srcPath, FileSystem parityFs, Path parityPath,
+      long blockSize, long blockOffset, File localBlockFile, long limit,
+      Context context) throws IOException, InterruptedException {
     OutputStream out = new FileOutputStream(localBlockFile);
     fixErasedBlock(srcFs, srcPath, parityFs, parityPath,
-                  blockSize, blockOffset, limit, false, out, context,
-                  false);
+        blockSize, blockOffset, limit, false, out, context,
+        false);
     out.close();
   }
 
@@ -155,29 +148,29 @@ public class Decoder {
     } else {
       // Search for xor/rs parity files
       if (ParityFilePair.getParityFile(
-        Codec.getCodec("xor"), srcFile, this.conf) != null)
+          Codec.getCodec("xor"), srcFile, this.conf) != null)
         return "xor";
       if (ParityFilePair.getParityFile(
-        Codec.getCodec("rs"), srcFile, this.conf) != null)
+          Codec.getCodec("rs"), srcFile, this.conf) != null)
         return "rs";
     }
     return null;
   }
 
   DecoderInputStream generateAlternateStream(FileSystem srcFs, Path srcFile,
-                      FileSystem parityFs, Path parityFile,
-                      long blockSize, long errorOffset, long limit,
-                      Context context) {
+      FileSystem parityFs, Path parityFile,
+      long blockSize, long errorOffset, long limit,
+      Context context) {
     configureBuffers(blockSize);
     Progressable reporter = context;
     if (reporter == null) {
       reporter = RaidUtils.NULL_PROGRESSABLE;
     }
-    
+
     DecoderInputStream decoderInputStream = new DecoderInputStream(
-        reporter, limit, blockSize, errorOffset, 
+        reporter, limit, blockSize, errorOffset,
         srcFs, srcFile, parityFs, parityFile);
-    
+
     return decoderInputStream;
   }
 
@@ -210,11 +203,11 @@ public class Decoder {
             " is still under test");
       }
       if (partial) {
-        throw new IOException("Couldn't reconstruct the partial data because " 
+        throw new IOException("Couldn't reconstruct the partial data because "
             + "old decoders don't support it");
       }
       Decoder decoder = (oldId.equals("xor"))? new XORDecoder(conf):
-                                               new ReedSolomonDecoder(conf);
+        new ReedSolomonDecoder(conf);
       CRC32 newCRC = null;
       long newLen = 0;
       if (!skipVerify) {
@@ -227,16 +220,16 @@ public class Decoder {
       long oldLen = decoder.fixErasedBlockImpl(srcFs, srcFile, parityFs,
           parityFile, blockSize, errorOffset, limit, partial, out,
           reporter, oldCRC);
-      
+
       if (!skipVerify) {
         if (newCRC.getValue() != oldCRC.getValue() ||
             newLen != oldLen) {
           LOG.error(" New code " + codec.id +
-                    " produces different data from old code " + oldId +
-                    " during fixing " + srcFile + " (offset=" + errorOffset +
-                    ", limit=" + limit + ")" +
-                    " checksum:" + newCRC.getValue() + ", " + oldCRC.getValue() +
-                    " len:" + newLen + ", " + oldLen);
+              " produces different data from old code " + oldId +
+              " during fixing " + srcFile + " (offset=" + errorOffset +
+              ", limit=" + limit + ")" +
+              " checksum:" + newCRC.getValue() + ", " + oldCRC.getValue() +
+              " len:" + newLen + ", " + oldLen);
           if (context != null) {
             context.getCounter(Counter.BLOCK_FIX_SIMULATION_FAILED).increment(1L);
             String outkey = srcFile.toUri().getPath();
@@ -245,10 +238,10 @@ public class Decoder {
           }
         } else {
           LOG.info(" New code " + codec.id +
-                   " produces the same data with old code " + oldId +
-                   " during fixing " + srcFile + " (offset=" + errorOffset +
-                   ", limit=" + limit + ")"
-                   );
+              " produces the same data with old code " + oldId +
+              " during fixing " + srcFile + " (offset=" + errorOffset +
+              ", limit=" + limit + ")"
+              );
           if (context != null) {
             context.getCounter(Counter.BLOCK_FIX_SIMULATION_SUCCEEDED).increment(1L);
           }
@@ -257,7 +250,7 @@ public class Decoder {
     } else {
       fixErasedBlockImpl(srcFs, srcFile, parityFs, parityFile, blockSize,
           errorOffset, limit, partial, out, reporter, null);
-   }
+    }
   }
 
   long fixErasedBlockImpl(FileSystem srcFs, Path srcFile, FileSystem parityFs,
@@ -271,7 +264,7 @@ public class Decoder {
     int blockIdx = (int) (errorOffset/blockSize);
     LocationPair lp = StripeReader.getBlockLocation(codec, srcFs,
         srcFile, blockIdx, conf);
-    int erasedLocationToFix = codec.parityLength + lp.getBlockIdxInStripe(); 
+    int erasedLocationToFix = codec.parityLength + lp.getBlockIdxInStripe();
 
     FileStatus srcStat = srcFs.getFileStatus(srcFile);
     FileStatus parityStat = parityFs.getFileStatus(parityFile);
@@ -281,27 +274,27 @@ public class Decoder {
     // Start off with one erased location.
     erasedLocations.add(erasedLocationToFix);
     List<Integer> locationsToRead = new ArrayList<Integer>(
-    		codec.parityLength + codec.stripeLength);
+        codec.parityLength + codec.stripeLength);
 
     int boundedBufferCapacity = 2;
     ParallelStreamReader parallelReader = null;
     LOG.info("Need to write " + limit +
-             " bytes for erased location index " + erasedLocationToFix);
-    
+        " bytes for erased location index " + erasedLocationToFix);
+
     long startOffsetInBlock = 0;
     if (partial) {
       startOffsetInBlock = errorOffset % blockSize;
     }
-    
+
     // will be resized later
     int[] erasedLocationsArray = new int[0];
     int[] locationsToReadArray = new int[0];
     int[] locationsNotToReadArray = new int[0];
-    
-    try {   	
+
+    try {
       numReadBytes = 0;
       long written;
-      
+
       // Loop while the number of written bytes is less than the max.
       for (written = 0; written < limit; ) {
         try {
@@ -314,77 +307,77 @@ public class Decoder {
                 srcStat, parityFs, parityFile, parityStat,
                 lp.getStripeIdx(), offsetInBlock, erasedLocations,
                 locationsToRead, code);
-            
+
             /*
              *  locationsToRead how now been populated and erasedLocations
              *  might have been updated with more erased locations.
              */
             LOG.info("Erased locations: " + erasedLocations.toString() +
-                    "\nLocations to Read for repair:" + locationsToRead.toString());
-          
+                "\nLocations to Read for repair:" + locationsToRead.toString());
+
             /*
              * Initialize erasedLocationsArray with the erasedLocations ordered.
              */
             int i = 0;
             erasedLocationsArray = new int[erasedLocations.size()];
             for (int loc = 0; loc < codec.stripeLength + codec.parityLength; loc++){
-            	if (erasedLocations.indexOf(loc) >= 0){
-            		erasedLocationsArray[i] = loc;
-                	i++;
-                }
+              if (erasedLocations.indexOf(loc) >= 0){
+                erasedLocationsArray[i] = loc;
+                i++;
+              }
             }
-            
+
             /*
              * Initialize locationsToReadArray with the locationsToRead ordered.
              */
             i = 0;
             locationsToReadArray = new int[locationsToRead.size()];
             for (int loc = 0; loc < codec.stripeLength + codec.parityLength; loc++){
-            	if (locationsToRead.indexOf(loc) >= 0){
-            		locationsToReadArray[i] = loc;
-                	i++;
-            	}              
+              if (locationsToRead.indexOf(loc) >= 0){
+                locationsToReadArray[i] = loc;
+                i++;
+              }
             }
-            
+
             i = 0;
-            locationsNotToReadArray = new int[codec.stripeLength + 
-                                      codec.parityLength - locationsToRead.size()];
-            
+            locationsNotToReadArray = new int[codec.stripeLength +
+                                              codec.parityLength - locationsToRead.size()];
+
             for (int loc = 0; loc < codec.stripeLength + codec.parityLength; loc++){
-            	if (locationsToRead.indexOf(loc) == -1 ||
-            			erasedLocations.indexOf(loc) != -1){
-            		locationsNotToReadArray[i] = loc;
-                	i++;
-            	}              
+              if (locationsToRead.indexOf(loc) == -1 ||
+                  erasedLocations.indexOf(loc) != -1){
+                locationsNotToReadArray[i] = loc;
+                i++;
+              }
             }
 
             this.writeBufs = new byte[erasedLocations.size()][];
             allocateBuffers();
 
             assert(parallelReader == null);
-            parallelReader = new ParallelStreamReader(reporter, inputs, 
-              (int)Math.min(bufSize, limit),
-              parallelism, boundedBufferCapacity, Math.min(limit, blockSize));
+            parallelReader = new ParallelStreamReader(reporter, inputs,
+                (int)Math.min(bufSize, limit),
+                parallelism, boundedBufferCapacity, Math.min(limit, blockSize));
             parallelReader.start();
           }
           ParallelStreamReader.ReadResult readResult = readFromInputs(
-            erasedLocations, limit, reporter, parallelReader);
-          
-          code.decodeBulk(readResult.readBufs, writeBufs, erasedLocationsArray, 
-        		  locationsToReadArray, locationsNotToReadArray);
-          
+              erasedLocations, limit, reporter, parallelReader);
+
+          code.decodeBulk(readResult.readBufs, writeBufs, erasedLocationsArray,
+              locationsToReadArray, locationsNotToReadArray);
+
           for (int i = 0; i < inputs.length; i++) {
             numReadBytes += readResult.numRead[i];
           }
 
-          int toWrite = (int)Math.min((long)bufSize, limit - written);
+          int toWrite = (int)Math.min(bufSize, limit - written);
           for (int i = 0; i < erasedLocationsArray.length; i++) {
 
-        	  if (erasedLocationsArray[i] == erasedLocationToFix) {
-	              if (out != null)
-	                out.write(writeBufs[i], 0, toWrite);
-	              if (crc != null) {
-	                crc.update(writeBufs[i], 0, toWrite);
+            if (erasedLocationsArray[i] == erasedLocationToFix) {
+              if (out != null)
+                out.write(writeBufs[i], 0, toWrite);
+              if (crc != null) {
+                crc.update(writeBufs[i], 0, toWrite);
               }
               written += toWrite;
               break;
@@ -413,10 +406,10 @@ public class Decoder {
   }
 
   ParallelStreamReader.ReadResult readFromInputs(
-          List<Integer> erasedLocations,
-          long limit,
-          Progressable reporter,
-          ParallelStreamReader parallelReader) throws IOException {
+      List<Integer> erasedLocations,
+      long limit,
+      Progressable reporter,
+      ParallelStreamReader parallelReader) throws IOException {
     ParallelStreamReader.ReadResult readResult;
     try {
       long start = System.currentTimeMillis();
@@ -448,129 +441,129 @@ public class Decoder {
     }
     return readResult;
   }
-  
+
   public class DecoderInputStream extends InputStream {
-    
+
     private long limit;
     private ParallelStreamReader parallelReader = null;
     private byte[] buffer;
     private long bufferLen;
     private int position;
     private long numRead = 0;
-    
+
     private final Progressable reporter;
     private InputStream[] inputs;
     private final int boundedBufferCapacity = 2;
-    
+
     private final long blockSize;
     private final long errorOffset;
     private long startOffsetInBlock;
-    
+
     private final FileSystem srcFs;
     private final Path srcFile;
     private final FileSystem parityFs;
     private final Path parityFile;
-    
+
     private int blockIdx;
     private int erasedLocationToFix;
     private LocationPair locationPair;
-    
+
     private long currentOffset;
     private final Log DECODER_METRICS_LOG = LogFactory.getLog("RaidMetrics");
     private long dfsNumRead = 0;
 
     private final List<Integer> locationsToRead = new ArrayList<Integer>();
     private final List<Integer> erasedLocations = new ArrayList<Integer>();
-    
+
     public DecoderInputStream(
         final Progressable reporter,
         final long limit,
         final long blockSize,
         final long errorOffset,
-        final FileSystem srcFs, 
+        final FileSystem srcFs,
         final Path srcFile,
-        final FileSystem parityFs, 
+        final FileSystem parityFs,
         final Path parityFile) {
-      
+
       this.reporter = reporter;
       this.limit = limit;
-      
+
       this.blockSize = blockSize;
       this.errorOffset = errorOffset;
-      
+
       this.srcFile = srcFile;
       this.srcFs = srcFs;
       this.parityFile = parityFile;
       this.parityFs = parityFs;
-      
+
       this.blockIdx = (int) (errorOffset/blockSize);
       this.startOffsetInBlock = errorOffset % blockSize;
       this.currentOffset = errorOffset;
-      
+
     }
 
     public long getCurrentOffset() {
       return currentOffset;
     }
-    
+
     public long getAvailable() {
       return limit - numRead;
     }
-    
+
     private void checkBuffer() throws IOException {
 
       // will be resized later
       int[] locationsToReadArray = new int[0];
       int[] locationsNotToReadArray = new int[0];
       int[] erasedLocationsArray = new int[0];
-        
+
       if (numRead >= limit) {
         buffer = null;
         return;
       }
-      
+
       if (null == locationPair) {
-        locationPair = StripeReader.getBlockLocation(codec, srcFs, 
+        locationPair = StripeReader.getBlockLocation(codec, srcFs,
             srcFile, blockIdx, conf);
-        erasedLocationToFix = codec.parityLength + 
+        erasedLocationToFix = codec.parityLength +
             locationPair.getBlockIdxInStripe();
         erasedLocations.add(erasedLocationToFix);
       }
 
-      
+
       if (null == parallelReader) {
-        
+
         long offsetInBlock = numRead + startOffsetInBlock;
-        
+
         FileStatus srcStat = srcFs.getFileStatus(srcFile);
         FileStatus parityStat = parityFs.getFileStatus(parityFile);
-        StripeReader sReader = StripeReader.getStripeReader(codec, conf, 
-            blockSize, srcFs, locationPair.getStripeIdx(), 
+        StripeReader sReader = StripeReader.getStripeReader(codec, conf,
+            blockSize, srcFs, locationPair.getStripeIdx(),
             srcFile, srcStat.getLen());
-        
+
         inputs = sReader.buildInputs(srcFs, srcFile, srcStat,
             parityFs, parityFile, parityStat,
             locationPair.getStripeIdx(), offsetInBlock,
             erasedLocations, locationsToRead, code);
-        
-        
+
+
         /*
          *  locationsToRead how now been populated and erasedLocations
          *  might have been updated with more erased locations.
          */
         LOG.info("Erased locations: " + erasedLocations.toString() +
-                "\nLocations to Read for repair:" + locationsToRead.toString());
-      
+            "\nLocations to Read for repair:" + locationsToRead.toString());
+
         /*
          * Initialize erasedLocationsArray with the erasedLocations ordered.
          */
         int i = 0;
         erasedLocationsArray = new int[erasedLocations.size()];
         for (int loc = 0; loc < codec.stripeLength + codec.parityLength; loc++){
-        	if (erasedLocations.indexOf(loc) >= 0){
-        		erasedLocationsArray[i] = loc;
-            	i++;
-        	}              
+          if (erasedLocations.indexOf(loc) >= 0){
+            erasedLocationsArray[i] = loc;
+            i++;
+          }
         }
         /*
          * Initialize locationsToReadArray with the locationsToRead ordered.
@@ -578,51 +571,51 @@ public class Decoder {
         i = 0;
         locationsToReadArray = new int[locationsToRead.size()];
         for (int loc = 0; loc < codec.stripeLength + codec.parityLength; loc++){
-        	if (locationsToRead.indexOf(loc) >= 0){
-        		locationsToReadArray[i] = loc;
-            	i++;
-        	}              
+          if (locationsToRead.indexOf(loc) >= 0){
+            locationsToReadArray[i] = loc;
+            i++;
+          }
         }
-        
+
         /*
          * Initialize locationsNotToReadArray with the locations that are either
          * erased or not supposed to be read.
          */
         i = 0;
-        locationsNotToReadArray = new int[codec.stripeLength + 
-                                  codec.parityLength - locationsToRead.size()];
-        
+        locationsNotToReadArray = new int[codec.stripeLength +
+                                          codec.parityLength - locationsToRead.size()];
+
         for (int loc = 0; loc < codec.stripeLength + codec.parityLength; loc++){
-        	if (locationsToRead.indexOf(loc) == -1 || erasedLocations.indexOf(loc) != -1){
-        		locationsNotToReadArray[i] = loc;
-            	i++;
-        	}              
+          if (locationsToRead.indexOf(loc) == -1 || erasedLocations.indexOf(loc) != -1){
+            locationsNotToReadArray[i] = loc;
+            i++;
+          }
         }
-        
+
         writeBufs = new byte[erasedLocations.size()][];
         allocateBuffers();
-        
+
 
         assert(parallelReader == null);
         parallelReader = new ParallelStreamReader(reporter, inputs, bufSize,
             parallelism, boundedBufferCapacity, limit);
         parallelReader.start();
       }
-    
+
       if (null != buffer && position == bufferLen) {
         buffer = null;
       }
 
       if (null == buffer) {
-        ParallelStreamReader.ReadResult readResult = 
+        ParallelStreamReader.ReadResult readResult =
             readFromInputs(erasedLocations, limit, reporter, parallelReader);
-        
+
         // get the number of bytes read through hdfs.
         for (int readNum : readResult.numRead) {
           dfsNumRead += readNum;
         }
         code.decodeBulk(readResult.readBufs, writeBufs, erasedLocationsArray,
-        		locationsToReadArray, locationsNotToReadArray);
+            locationsToReadArray, locationsNotToReadArray);
 
         for (int i=0; i<erasedLocationsArray.length; i++) {
           if (erasedLocationsArray[i] == erasedLocationToFix) {
@@ -643,7 +636,7 @@ public class Decoder {
           if (null == parallelReader) {
             return -1;
           }
-          
+
           break;
         } catch (IOException e) {
           if (e instanceof TooManyErasedLocations) {
@@ -679,7 +672,7 @@ public class Decoder {
     public int read(byte[] b, int off, int len) throws IOException {
       long startTime = System.currentTimeMillis();
       dfsNumRead = 0;
-      
+
       if (b == null) {
         throw new NullPointerException();
       } else if (off < 0 || len < 0 || len > b.length - off) {
@@ -693,7 +686,7 @@ public class Decoder {
         c = read();
       } catch(IOException e) {
         long delay = System.currentTimeMillis() - startTime;
-        logRaidReconstructionMetrics("FAILURE", 0, codec, delay, 
+        logRaidReconstructionMetrics("FAILURE", 0, codec, delay,
             erasedLocations.size(), dfsNumRead);
         throw e;
       }
@@ -712,15 +705,15 @@ public class Decoder {
         }
       } catch (IOException ee) {
       }
-      
+
       long delay = System.currentTimeMillis() - startTime;
-      logRaidReconstructionMetrics("SUCCESS", i, codec, delay, 
+      logRaidReconstructionMetrics("SUCCESS", i, codec, delay,
           erasedLocations.size(), dfsNumRead);
       return i;
     }
-    
+
     private void logRaidReconstructionMetrics(
-        String result, long bytes, Codec codec, long delay, 
+        String result, long bytes, Codec codec, long delay,
         int numMissingBlocks, long numReadBytes) {
 
       try {
@@ -734,8 +727,8 @@ public class Decoder {
         DECODER_METRICS_LOG.info(json.toString());
 
       } catch(JSONException e) {
-        LOG.warn("Exception when logging the Raid metrics: " + e.getMessage(), 
-                 e);
+        LOG.warn("Exception when logging the Raid metrics: " + e.getMessage(),
+            e);
       }
     }
 
@@ -748,7 +741,7 @@ public class Decoder {
       RaidUtils.closeStreams(inputs);
       super.close();
     }
-  }  
+  }
 }
 
 
